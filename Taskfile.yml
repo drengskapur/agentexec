@@ -1,0 +1,123 @@
+version: '3'
+
+# Global variables for reusability and easy configuration
+vars:
+  BINARY_NAME: omnivex
+  BUILD_DIR: build
+  MAIN_GO: main.go
+
+# Define all available tasks
+tasks:
+  # Default task when running `task` without arguments
+  default:
+    desc: "Build the application"
+    cmds:
+    - task: build
+
+  # Build the Go application
+  build:
+    desc: "Build the Go application"
+    cmds:
+    - echo "📦 Building {{.BINARY_NAME}}..."
+    - mkdir -p {{.BUILD_DIR}}
+    - go build -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN_GO}}
+
+  # Run the Go application
+  run:
+    desc: "Run the Go application"
+    cmds:
+    - echo "🏃 Running {{.BINARY_NAME}}..."
+    - go run {{.MAIN_GO}}
+
+  # Run tests across all packages
+  test:
+    desc: "Run tests"
+    cmds:
+    - echo "🧪 Running tests..."
+    - go test ./... -v
+
+  # Format the Go code using `go fmt`
+  fmt:
+    desc: "Format the code"
+    cmds:
+    - echo "🧹 Formatting code..."
+    - go fmt ./...
+
+  # Lint the code using `golangci-lint` (ensure it's installed)
+  lint:
+    desc: "Lint the code using golangci-lint"
+    cmds:
+    - echo "🔍 Linting code..."
+    - golangci-lint run ./...
+
+  # Autofix the code: format and fix linting issues
+  autofix:
+    desc: "Automatically fix formatting and linting issues"
+    cmds:
+    - echo "🛠️ Autofixing code..."
+    - task fmt
+    - echo "🔧 Running golangci-lint with autofix..."
+    - golangci-lint run --fix ./...
+    - echo "🔄 Tidying up dependencies..."
+    - go mod tidy
+
+  # Generate documentation using `godoc` and open it in the browser
+  docs:
+    desc: "Generate and view documentation"
+    cmds:
+    - echo "📄 Generating documentation..."
+    - godoc -http=:6060 &
+    - sleep 2
+    # Replace 'open' with 'xdg-open' for Linux or 'start' for Windows
+    - |
+      if [[ "$OSTYPE" == "darwin"* ]]; then
+        open http://localhost:6060/pkg/
+      elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        xdg-open http://localhost:6060/pkg/
+      elif [[ "$OSTYPE" == "msys" ]]; then
+        start http://localhost:6060/pkg/
+      else
+        echo "Please open http://localhost:6060/pkg/ manually in your browser."
+      fi
+
+  # Clean build artifacts
+  clean:
+    desc: "Clean build artifacts"
+    cmds:
+    - echo "🧹 Cleaning build artifacts..."
+    - rm -rf {{.BUILD_DIR}}
+
+  # Install project dependencies
+  deps:
+    desc: "Install project dependencies"
+    cmds:
+    - echo "📦 Installing dependencies..."
+    - go mod download
+
+  # Update project dependencies to the latest versions
+  update-deps:
+    desc: "Update project dependencies"
+    cmds:
+    - echo "🔄 Updating dependencies..."
+    - go get -u ./...
+    - go mod tidy
+
+  # Docker build task (ensure you have a Dockerfile)
+  docker-build:
+    desc: "Build Docker image"
+    cmds:
+    - echo "🐳 Building Docker image..."
+    - docker build -t {{.BINARY_NAME}}:latest .
+
+  # Help task to list all available tasks with descriptions
+  help:
+    desc: "Show help"
+    cmds:
+    - "task --list --format {{.Name}}: {{.Desc}}"
+
+  # Bootstrap task to run the bootstrapping script (if needed)
+  bootstrap:
+    desc: "Run the bootstrapping script"
+    cmds:
+    - echo "🔧 Running bootstrap.sh..."
+    - ./bootstrap.sh

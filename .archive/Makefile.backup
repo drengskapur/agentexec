@@ -1,0 +1,82 @@
+#-----------------------------------------------------------------------------#
+# Makefile for Omnivex
+#-----------------------------------------------------------------------------#
+
+APP_NAME := omnivex
+BUILD_DIR := build
+ZARF_BINARY := zarf
+
+# Define colors for output
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
+
+#-----------------------------------------------------------------------------#
+# Get the latest Zarf version from GitHub
+#-----------------------------------------------------------------------------#
+latest_zarf_version = $(shell curl -s https://api.github.com/repos/defenseunicorns/zarf/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+#-----------------------------------------------------------------------------#
+# Phony Targets
+#-----------------------------------------------------------------------------#
+.PHONY: all install-deps build run clean help
+
+#-----------------------------------------------------------------------------#
+# Default Target
+#-----------------------------------------------------------------------------#
+all: build
+
+#-----------------------------------------------------------------------------#
+# Install dependencies and download the latest Zarf binary if necessary
+#-----------------------------------------------------------------------------#
+install-deps:
+	@echo -e "$(YELLOW)Checking and installing dependencies...$(NC)"
+	@./scripts/install_dependencies.sh
+
+	@echo -e "$(GREEN)Dependencies installed successfully.$(NC)"
+
+#-----------------------------------------------------------------------------#
+# Build the application
+#-----------------------------------------------------------------------------#
+build: install-deps
+	@echo -e "$(YELLOW)Building $(APP_NAME)...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	@go build -o $(BUILD_DIR)/$(APP_NAME) main.go packager.go unpackager.go api.go
+	@echo -e "$(GREEN)Build complete. Executable available at $(BUILD_DIR)/$(APP_NAME)$(NC)"
+
+#-----------------------------------------------------------------------------#
+# Run the application
+#-----------------------------------------------------------------------------#
+run: build
+	@echo -e "$(YELLOW)Running $(APP_NAME)...$(NC)"
+	@ZARF_BINARY=$(BUILD_DIR)/$(ZARF_BINARY) $(BUILD_DIR)/$(APP_NAME)
+
+#-----------------------------------------------------------------------------#
+# Clean up build artifacts
+#-----------------------------------------------------------------------------#
+clean:
+	@echo -e "$(YELLOW)Cleaning up...$(NC)"
+	@rm -rf $(BUILD_DIR)
+	@echo -e "$(GREEN)Cleanup complete.$(NC)"
+
+#-----------------------------------------------------------------------------#
+# Display available make commands
+#-----------------------------------------------------------------------------#
+help:
+	@echo "Available commands:"
+	@echo "  make install-deps - Installs necessary dependencies and downloads the latest Zarf"
+	@echo "  make build        - Builds the application"
+	@echo "  make run          - Runs the application"
+	@echo "  make clean        - Cleans up build artifacts"
+	@echo "  make help         - Shows this help message"
+
+#-----------------------------------------------------------------------------#
+# Download the latest Zarf binary if not present
+#-----------------------------------------------------------------------------#
+download-zarf:
+	@echo -e "$(YELLOW)Downloading Zarf version $(latest_zarf_version)...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	@curl -Lo $(BUILD_DIR)/$(ZARF_BINARY) https://github.com/defenseunicorns/zarf/releases/download/$(latest_zarf_version)/zarf_$(latest_zarf_version)_linux_amd64
+	@chmod +x $(BUILD_DIR)/$(ZARF_BINARY)
+	@echo -e "$(GREEN)Zarf downloaded successfully.$(NC)"

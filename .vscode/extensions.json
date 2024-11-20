@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "task.vscode-task",
+        "redhat.vscode-yaml",
+        "kennylong.kubernetes-yaml-formatter",
+        "github.copilot",
+        "github.copilot-chat",
+        "golang.go"
+    ]
+}
