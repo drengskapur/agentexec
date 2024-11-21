@@ -31,8 +31,8 @@ var versionCmd = &cobra.Command{
 		// Display version information to the user
 		fmt.Println(v.String())
 
-		// Optionally, log that the version command was executed
-		logger.Info("Executed version command", zap.String("version", v.Version), zap.String("commit", v.GitCommit))
+		// Log that the version command was executed
+		logger.Debug("Executed version command", zap.String("version", v.Version), zap.String("commit", v.GitCommit))
 	},
 }
 

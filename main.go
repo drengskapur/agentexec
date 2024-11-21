@@ -2,70 +2,92 @@ package main
 
 import (
 	"log"
-	"omnivex/cmd"
 	"os"
-	"strings"
+	"runtime/debug"
+
+	"omnivex/cmd"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/term"
 )
 
+// createLogger creates and configures the application's logger
+func createLogger(verbose bool) (*zap.Logger, error) {
+	// Configure encoder
+	encoderConfig := zapcore.EncoderConfig{
+		TimeKey:        "timestamp",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	// Create stdout syncer
+	stdout := zapcore.AddSync(os.Stdout)
+
+	// Determine log level based on verbose flag
+	level := zap.InfoLevel
+	if verbose {
+		level = zap.DebugLevel
+	}
+
+	// Create console encoder and core
+	consoleEncoder := zapcore.NewConsoleEncoder(encoderConfig)
+	core := zapcore.NewCore(consoleEncoder, stdout, level)
+
+	// Get build info for startup logging only
+	buildInfo, _ := debug.ReadBuildInfo()
+
+	// Create base logger
+	logger := zap.New(core,
+		zap.AddCaller(),
+		zap.AddStacktrace(zapcore.ErrorLevel),
+	)
+
+	// Log startup information once
+	logger.Debug("Starting Omnivex",
+		zap.String("app_version", "1.0.0"),
+		zap.String("go_version", buildInfo.GoVersion),
+		zap.Int("pid", os.Getpid()),
+		zap.Bool("verbose_mode", verbose),
+	)
+
+	// Return clean logger without default fields
+	return logger, nil
+}
+
 func main() {
-	// Default to plain text output
-	outputFormat := "text"
-
-	// Check for an environment variable to override the output format
-	if envFormat := os.Getenv("OMNIVEX_LOG_FORMAT"); envFormat != "" {
-		outputFormat = envFormat
+	// Parse verbose flag
+	verbose := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--verbose" || arg == "-v" {
+			verbose = true
+			break
+		}
 	}
 
-	var logger *zap.Logger
-	var err error
-
-	// Create the logger based on the chosen format
-	switch strings.ToLower(outputFormat) {
-	case "json":
-		logger, err = zap.NewProduction(zap.Fields(
-			zap.String("appName", "Omnivex"),
-			zap.String("appVersion", "1.0.0"),
-		))
-	case "text", "": // Treat empty string as text
-		config := zap.NewDevelopmentConfig()
-		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder // Add color for text output
-		logger, err = config.Build()
-	default:
-		log.Fatalf("Invalid log format: %s. Supported formats: json, text", outputFormat)
-	}
-
+	// Initialize logger
+	logger, err := createLogger(verbose)
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer func() {
-		if term.IsTerminal(int(os.Stderr.Fd())) || isRegularFile(os.Stderr) {
-			if syncErr := logger.Sync(); syncErr != nil {
-				lowerErr := strings.ToLower(syncErr.Error())
-				if !strings.Contains(lowerErr, "invalid argument") {
-					log.Printf("Logger sync failed: %v", syncErr)
-				}
-			}
-		}
+		_ = logger.Sync()
 	}()
 
-	logger.Info("Omnivex application started", zap.String("logFormat", outputFormat)) // Log the format
-
+	// Execute root command
 	if err := cmd.Execute(logger); err != nil {
-		logger.Fatal("Omnivex execution failed", zap.Error(err))
+		logger.Error("Application execution failed",
+			zap.Error(err),
+			zap.String("command", os.Args[0]),
+		)
+		os.Exit(1)
 	}
-
-	logger.Info("Omnivex application finished successfully")
-}
-
-// isRegularFile checks if the given file is a regular file.
-func isRegularFile(f *os.File) bool {
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return fileInfo.Mode().IsRegular()
 }

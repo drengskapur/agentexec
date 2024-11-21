@@ -51,7 +51,7 @@ type CollectedFiles struct {
 
 // ExecuteWithArgs is the main entry point for the combine package with custom arguments.
 func ExecuteWithArgs(args Arguments, logger *zap.Logger) error {
-	logger.Info("Starting combine process", zap.Strings("paths", args.Paths))
+	logger.Debug("Starting combine process", zap.Strings("paths", args.Paths))
 
 	// Ensure output and tree directories exist
 	if err := os.MkdirAll(filepath.Dir(args.Output), os.ModePerm); err != nil {
@@ -74,7 +74,7 @@ func ExecuteWithArgs(args Arguments, logger *zap.Logger) error {
 	// Compile command-line ignore patterns and add them to the ignore parser
 	if len(args.IgnorePatterns) > 0 {
 		gi.CompileIgnoreLines(args.IgnorePatterns...)
-		logger.Info("Added command-line ignore patterns", zap.Int("count", len(args.IgnorePatterns)))
+		logger.Debug("Added command-line ignore patterns", zap.Int("count", len(args.IgnorePatterns)))
 	}
 
 	// Combine files and generate tree structure
@@ -96,7 +96,7 @@ func ExecuteWithArgs(args Arguments, logger *zap.Logger) error {
 
 // CombineFiles orchestrates the combination of files and tree generation.
 func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
-	logger.Info("Starting file combination process",
+	logger.Debug("Starting file combination process",
 		zap.Strings("inputPaths", args.Paths),
 		zap.String("outputFile", args.Output),
 		zap.Int("maxFileSizeKB", args.MaxFileSizeKB),
@@ -136,7 +136,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 					zap.Error(err))
 				continue
 			}
-			logger.Info("Collected files from directory",
+			logger.Debug("Collected files from directory",
 				zap.String("dir", absPath),
 				zap.Int("regularFileCount", len(collected.Regular)),
 				zap.Int("binaryFileCount", len(collected.Binary)))
@@ -174,7 +174,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 		}
 
 		if !shouldContinue {
-			logger.Info("User chose to abort the combine process due to detected binary files.")
+			logger.Debug("User chose to abort the combine process due to detected binary files.")
 			return nil
 		}
 	}
@@ -184,7 +184,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 		return nil
 	}
 
-	logger.Info("Starting file processing",
+	logger.Debug("Starting file processing",
 		zap.Int("totalFiles", len(allFilesToProcess)))
 
 	// Process files concurrently
@@ -195,7 +195,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	numWorkers := args.MaxWorkers
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
-		logger.Info("Adjusted worker count",
+		logger.Debug("Adjusted worker count",
 			zap.Int("workers", numWorkers))
 	}
 
@@ -233,7 +233,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	close(results)
 	<-done
 
-	logger.Info("All files processed",
+	logger.Debug("All files processed",
 		zap.Int("processedFiles", len(combinedContents)))
 
 	// Sort files for consistent output
@@ -243,7 +243,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	logger.Debug("Sorted processed files")
 
 	// Generate tree structure
-	logger.Info("Generating tree structure")
+	logger.Debug("Generating tree structure")
 
 	treeBuilder := strings.Builder{}
 	for _, path := range args.Paths {
@@ -282,14 +282,14 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	treeContent := treeBuilder.String()
 
 	// Write tree structure to tree.txt
-	logger.Info("Writing tree structure to tree.txt", zap.String("treeFile", args.Tree))
+	logger.Debug("Writing tree structure to tree.txt", zap.String("treeFile", args.Tree))
 	if err := os.WriteFile(args.Tree, []byte(treeContent), 0644); err != nil {
 		logger.Error("Failed to write tree structure", zap.String("treeFile", args.Tree), zap.Error(err))
 		return fmt.Errorf("failed to write tree structure: %w", err)
 	}
 
 	// Create combined.txt and write tree at the top
-	logger.Info("Writing combined content to combined.txt", zap.String("combinedFile", args.Output))
+	logger.Debug("Writing combined content to combined.txt", zap.String("combinedFile", args.Output))
 	if err := os.MkdirAll(filepath.Dir(args.Output), 0755); err != nil {
 		logger.Error("Failed to create output directory",
 			zap.String("dir", filepath.Dir(args.Output)),
@@ -766,7 +766,7 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 						zap.Error(err))
 					return nil, fmt.Errorf("failed to create .combineignore file: %w", err)
 				}
-				gi.logger.Info("Created default .combineignore file",
+				gi.logger.Debug("Created default .combineignore file",
 					zap.String("file", absLocalPath),
 					zap.String("location", absLocalPath))
 			} else {
@@ -789,7 +789,7 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 				zap.String("file", absGlobalPath))
 			if err := gi.CompileIgnoreFile(absGlobalPath); err != nil {
 				if os.IsNotExist(err) {
-					gi.logger.Info("Global ignore file does not exist and will be skipped",
+					gi.logger.Debug("Global ignore file does not exist and will be skipped",
 						zap.String("file", absGlobalPath))
 				} else {
 					gi.logger.Error("Failed to compile global ignore file",
@@ -798,7 +798,7 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 					return nil, err
 				}
 			} else {
-				gi.logger.Info("Successfully loaded global ignore file",
+				gi.logger.Debug("Successfully loaded global ignore file",
 					zap.String("file", absGlobalPath))
 			}
 		}
@@ -816,7 +816,7 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 				zap.String("file", absLocalPath))
 			if err := gi.CompileIgnoreFile(absLocalPath); err != nil {
 				if os.IsNotExist(err) {
-					gi.logger.Info("Local ignore file does not exist and will be skipped",
+					gi.logger.Debug("Local ignore file does not exist and will be skipped",
 						zap.String("file", absLocalPath))
 				} else {
 					gi.logger.Error("Failed to compile local ignore file",
@@ -825,7 +825,7 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 					return nil, err
 				}
 			} else {
-				gi.logger.Info("Successfully loaded local ignore file",
+				gi.logger.Debug("Successfully loaded local ignore file",
 					zap.String("file", absLocalPath))
 			}
 		}
@@ -865,7 +865,7 @@ func (gi *GitIgnore) CompileIgnoreFile(filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			gi.logger.Info("Ignore file does not exist and will be skipped",
+			gi.logger.Debug("Ignore file does not exist and will be skipped",
 				zap.String("filePath", filePath))
 			return nil
 		}
@@ -900,7 +900,7 @@ func (gi *GitIgnore) CompileIgnoreFile(filePath string) error {
 				zap.Int("lineNo", i+1))
 		}
 	}
-	gi.logger.Info("Compiled ignore patterns from file",
+	gi.logger.Debug("Compiled ignore patterns from file",
 		zap.String("filePath", filePath),
 		zap.Int("patternCount", len(lines)))
 	return nil

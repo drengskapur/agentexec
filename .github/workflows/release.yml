@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: '1.23'
+
+      - name: Install Dependencies
+        run: |
+          task deps
+
+      - name: Run Tests
+        run: |
+          task test
+
+      - name: Build for Windows
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          task build
+        shell: bash
+
+      - name: Build for Linux
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          task build
+        shell: bash
+
+      - name: Build for macOS
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          task build
+        shell: bash
+
+      - name: Package Binaries
+        run: |
+          mkdir -p package/${VERSION}
+          
+          # Package Windows
+          cd build
+          zip -r ../package/${VERSION}/omnivex-${VERSION}-windows-amd64.zip omnivex.exe
+          cd ..
+          
+          # Package Linux
+          tar -czvf package/${VERSION}/omnivex-${VERSION}-linux-amd64.tar.gz -C build omnivex
+          
+          # Package macOS
+          tar -czvf package/${VERSION}/omnivex-${VERSION}-darwin-amd64.tar.gz -C build omnivex
+          
+          # Generate Checksums
+          cd package/${VERSION}
+          sha256sum * > checksums.txt
+          cd ../../
+
+      - name: Generate Release Notes
+        id: releasenotes
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace('refs/tags/', '');
+            const latestRelease = await github.rest.repos.getLatestRelease({
+              owner,
+              repo,
+            }).catch(() => null);
+
+            const since = latestRelease ? latestRelease.data.published_at : '1970-01-01T00:00:00Z';
+
+            const pullRequests = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'closed',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 100,
+            });
+
+            const mergedPRs = pullRequests.data.filter(pr => pr.merged_at && new Date(pr.merged_at) > new Date(since));
+
+            let releaseNotes = `## Release ${tag}\n\n### Changes\n\n`;
+
+            if (mergedPRs.length === 0) {
+              releaseNotes += '- No changes\n';
+            } else {
+              const categories = {
+                '🚀 Features': [],
+                '🐛 Bug Fixes': [],
+                '🛠 Maintenance': [],
+                'Other': []
+              };
+
+              mergedPRs.forEach(pr => {
+                const labels = pr.labels.map(label => label.name);
+                if (labels.includes('feature')) {
+                  categories['🚀 Features'].push(pr);
+                } else if (labels.includes('bug')) {
+                  categories['🐛 Bug Fixes'].push(pr);
+                } else if (labels.includes('chore') || labels.includes('refactor')) {
+                  categories['🛠 Maintenance'].push(pr);
+                } else {
+                  categories['Other'].push(pr);
+                }
+              });
+
+              for (const [category, prs] of Object.entries(categories)) {
+                if (prs.length > 0) {
+                  releaseNotes += `### ${category}\n\n`;
+                  prs.forEach(pr => {
+                    releaseNotes += `- ${pr.title} @${pr.user.login} (#${pr.number})\n`;
+                  });
+                  releaseNotes += `\n`;
+                }
+              }
+            }
+
+            return releaseNotes;
+          result-encoding: string
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: ${{ steps.releasenotes.outputs.result }}
+          draft: false
+          prerelease: ${{ startsWith(github.ref_name, 'v') && contains(github.ref_name, '-') }}
+
+      - name: Upload Release Assets (Windows)
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-windows-amd64.zip
+          asset_name: omnivex-${{ env.VERSION }}-windows-amd64.zip
+          asset_content_type: application/zip
+
+      - name: Upload Release Assets (Linux)
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-linux-amd64.tar.gz
+          asset_name: omnivex-${{ env.VERSION }}-linux-amd64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Release Assets (macOS)
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-darwin-amd64.tar.gz
+          asset_name: omnivex-${{ env.VERSION }}-darwin-amd64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Checksums
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./package/${{ env.VERSION }}/checksums.txt
+          asset_name: checksums.txt
+          asset_content_type: text/plain

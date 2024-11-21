@@ -171,9 +171,8 @@ tasks:
 
   deps:install-tools:
     desc: Install development tools
-    cmds:
-      - echo "🔧 Installing development tools..."
-      - task: install-tools
+    deps: [install-tools:godoc, install-tools:golangci-lint, install-tools:check-curl]
+    cmds: []
 
   install-tools:
     desc: Install development tools
@@ -183,7 +182,25 @@ tasks:
   install-tools:golangci-lint:
     desc: Install 'golangci-lint'
     cmds:
+      - echo "🔧 Installing 'golangci-lint'..."
       - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+  install-tools:godoc:
+    desc: Install 'godoc' tool
+    cmds:
+      - echo "🔧 Installing 'godoc'..."
+      - go install golang.org/x/tools/cmd/godoc@latest
+
+  install-tools:check-curl:
+    desc: Ensure 'curl' is installed
+    cmds:
+      - |
+        if ! command -v curl >/dev/null 2>&1; then
+          echo "❌ 'curl' is not installed. Please install it using your package manager."
+          exit 1
+        else
+          echo "✅ 'curl' is installed."
+        fi
 
   update-deps:
     desc: Update project dependencies
