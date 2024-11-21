@@ -8,80 +8,83 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment:
+      name: production
+
     env:
       VERSION: ${{ github.ref_name }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Set up Go
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version: '1.23'
+          cache: true
 
       - name: Install Dependencies
-        run: |
-          task deps
+        run: go mod tidy
 
       - name: Run Tests
-        run: |
-          task test
+        run: go test ./... -v -race -coverprofile=coverage.out
 
-      - name: Build for Windows
-        env:
-          GOOS: windows
-          GOARCH: amd64
+      - name: Build and Package
         run: |
-          task build
-        shell: bash
+          mkdir -p build/${{ env.VERSION }}
+          for os in windows linux darwin; do
+            case $os in
+              windows)
+                ext=".exe"
+                ;;
+              *)
+                ext=""
+                ;;
+            esac
+            
+            GOOS=$os GOARCH=amd64 go build -ldflags="-s -w \
+              -X 'omnivex/pkg/version.Version=${{ env.VERSION }}' \
+              -X 'omnivex/pkg/version.Commit=$(git rev-parse --short HEAD)' \
+              -X 'omnivex/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+              -o "build/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-${os}-amd64${ext}" main.go
 
-      - name: Build for Linux
-        env:
-          GOOS: linux
-          GOARCH: amd64
-        run: |
-          task build
-        shell: bash
+            # Package binaries
+            if [ "$os" = "windows" ]; then
+              (cd "build/${{ env.VERSION }}" && zip "omnivex-${{ env.VERSION }}-${os}-amd64.zip" "omnivex-${{ env.VERSION }}-${os}-amd64${ext}")
+            else
+              tar -czf "build/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-${os}-amd64.tar.gz" -C "build/${{ env.VERSION }}" "omnivex-${{ env.VERSION }}-${os}-amd64"
+            fi
+          done
 
-      - name: Build for macOS
-        env:
-          GOOS: darwin
-          GOARCH: amd64
-        run: |
-          task build
-        shell: bash
-
-      - name: Package Binaries
-        run: |
-          mkdir -p package/${VERSION}
-          
-          # Package Windows
-          cd build
-          zip -r ../package/${VERSION}/omnivex-${VERSION}-windows-amd64.zip omnivex.exe
-          cd ..
-          
-          # Package Linux
-          tar -czvf package/${VERSION}/omnivex-${VERSION}-linux-amd64.tar.gz -C build omnivex
-          
-          # Package macOS
-          tar -czvf package/${VERSION}/omnivex-${VERSION}-darwin-amd64.tar.gz -C build omnivex
-          
           # Generate Checksums
-          cd package/${VERSION}
+          cd "build/${{ env.VERSION }}"
           sha256sum * > checksums.txt
-          cd ../../
+          
+          # Create final assets archive
+          zip -r "../omnivex-${{ env.VERSION }}-assets.zip" *
 
       - name: Generate Release Notes
-        id: releasenotes
+        id: release_notes
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const { owner, repo } = context.repo;
             const tag = context.ref.replace('refs/tags/', '');
-            const latestRelease = await github.rest.repos.getLatestRelease({
-              owner,
-              repo,
-            }).catch(() => null);
+            
+            let latestRelease;
+            try {
+              latestRelease = await github.rest.repos.getLatestRelease({
+                owner,
+                repo,
+              });
+            } catch (error) {
+              console.log('No previous release found');
+            }
 
             const since = latestRelease ? latestRelease.data.published_at : '1970-01-01T00:00:00Z';
 
@@ -94,12 +97,14 @@ jobs:
               per_page: 100,
             });
 
-            const mergedPRs = pullRequests.data.filter(pr => pr.merged_at && new Date(pr.merged_at) > new Date(since));
+            const mergedPRs = pullRequests.data.filter(pr => 
+              pr.merged_at && new Date(pr.merged_at) > new Date(since)
+            );
 
-            let releaseNotes = `## Release ${tag}\n\n### Changes\n\n`;
+            let releaseNotes = `## Release ${tag}\n\n`;
 
             if (mergedPRs.length === 0) {
-              releaseNotes += '- No changes\n';
+              releaseNotes += '### Changes\n\n- No changes\n';
             } else {
               const categories = {
                 '🚀 Features': [],
@@ -125,56 +130,23 @@ jobs:
                 if (prs.length > 0) {
                   releaseNotes += `### ${category}\n\n`;
                   prs.forEach(pr => {
-                    releaseNotes += `- ${pr.title} @${pr.user.login} (#${pr.number})\n`;
+                    releaseNotes += `- ${pr.title} (@${pr.user.login} #${pr.number})\n`;
                   });
-                  releaseNotes += `\n`;
+                  releaseNotes += '\n';
                 }
               }
             }
-
+            
             return releaseNotes;
-          result-encoding: string
 
       - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+        uses: softprops/action-gh-release@01570a1f39cb168c169c802c3bceb9e93fb10974 # v2.1.0
+        with:
+          name: Release ${{ env.VERSION }}
+          body: ${{ steps.release_notes.outputs.result }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            ./build/${{ env.VERSION }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body: ${{ steps.releasenotes.outputs.result }}
-          draft: false
-          prerelease: ${{ startsWith(github.ref_name, 'v') && contains(github.ref_name, '-') }}
-
-      - name: Upload Release Assets (Windows)
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-windows-amd64.zip
-          asset_name: omnivex-${{ env.VERSION }}-windows-amd64.zip
-          asset_content_type: application/zip
-
-      - name: Upload Release Assets (Linux)
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-linux-amd64.tar.gz
-          asset_name: omnivex-${{ env.VERSION }}-linux-amd64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Release Assets (macOS)
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./package/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-darwin-amd64.tar.gz
-          asset_name: omnivex-${{ env.VERSION }}-darwin-amd64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Checksums
-        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./package/${{ env.VERSION }}/checksums.txt
-          asset_name: checksums.txt
-          asset_content_type: text/plain

@@ -1,59 +1,95 @@
-name: Continuous Integration
+name: CI
 
 on:
   push:
     branches:
       - develop
-      - feature/**
-      - release/**
+      - 'feature/**'
+      - 'release/**'
   pull_request:
     branches:
       - develop
-      - release/**
+      - 'release/**'
   workflow_dispatch:
-
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         go-version: ['1.23']
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    env:
+      GO111MODULE: 'on'
+      CGO_ENABLED: 1
 
-      - name: Set up Go
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
           go-version: ${{ matrix.go-version }}
+          cache: 'go'
 
       - name: Cache Go Modules
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
         with:
           path: |
-            ~/.cache/go-build
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
 
       - name: Install Dependencies
+        run: go mod tidy
+
+      - name: Cache golangci-lint
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
+        with:
+          path: ~/.golangci-lint
+          key: ${{ runner.os }}-golangci-lint-${{ hashFiles('**/.golangci.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-golangci-lint-
+
+      - name: Install golangci-lint
+        if: "!steps.cache-golangci-lint.outputs.cache-hit"
         run: |
-          task deps
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.27.0
+        env:
+          GOLANGCI_LINT_VERSION: v1.27.0
+
+      - name: Verify golangci-lint
+        run: golangci-lint --version
 
       - name: Run Linters
-        run: |
-          task lint
+        run: golangci-lint run
 
       - name: Run Tests
         run: |
-          task test
+          go test ./... -v -race -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+
+      - name: Upload Coverage
+        if: success()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
 
       - name: Build Application
         run: |
-          task build
+          mkdir -p build
+          go build -ldflags="-s -w \
+            -X 'omnivex/pkg/version.Version=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.1)' \
+            -X 'omnivex/pkg/version.Commit=$(git rev-parse --short HEAD)' \
+            -X 'omnivex/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o build/omnivex${{ matrix.os == 'windows-latest' && '.exe' || '' }} main.go
 
       - name: Upload Build Artifacts
         if: success()
