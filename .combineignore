@@ -1,4 +1,5 @@
 __pycache__/
+.archive/
 .bundle/
 .cache/
 .combineignore
@@ -22,6 +23,7 @@ __pycache__/
 .pnpm-store/
 .svelte-kit/
 .svn/
+.task/
 .temp/
 .terraform.lock.hcl
 .terraform/

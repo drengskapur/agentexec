@@ -1,123 +1,267 @@
 version: '3'
 
-# Global variables for reusability and easy configuration
+# Global configurations
+output: prefixed
+silent: false
+interval: 5s
+set: [pipefail]
+shopt: [globstar]
+
+# Global variables for reusability
 vars:
   BINARY_NAME: omnivex
   BUILD_DIR: build
   MAIN_GO: main.go
+  VERSION:
+    sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
+  COMMIT:
+    sh: git rev-parse --short HEAD
+  BUILDTIME:
+    sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  LDFLAGS: >-
+    -X 'omnivex/pkg/version.Version={{.VERSION}}'
+    -X 'omnivex/pkg/version.Commit={{.COMMIT}}'
+    -X 'omnivex/pkg/version.BuildTime={{.BUILDTIME}}'
+  exeExt:
+    sh: |
+      case "{{.OS}}" in
+        windows) echo ".exe" ;;
+        *) echo "" ;;
+      esac
 
-# Define all available tasks
+# Tasks
 tasks:
-  # Default task when running `task` without arguments
   default:
-    desc: "Build the application"
+    desc: Build the application
+    deps: [lint, test]
     cmds:
-    - task: build
+      - task: build
 
-  # Build the Go application
   build:
-    desc: "Build the Go application"
+    desc: Build the Go application with versioning
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}}"
+    preconditions:
+      - sh: go version
+        msg: "Go must be installed"
     cmds:
-    - echo "📦 Building {{.BINARY_NAME}}..."
-    - mkdir -p {{.BUILD_DIR}}
-    - go build -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN_GO}}
+      - echo "📦 Building {{.BINARY_NAME}}..."
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} {{.MAIN_GO}}
 
-  # Run the Go application
   run:
-    desc: "Run the Go application"
+    desc: Run the Go application
+    deps: [build]
+    interactive: true
     cmds:
-    - echo "🏃 Running {{.BINARY_NAME}}..."
-    - go run {{.MAIN_GO}}
+      - echo "🏃 Running {{.BINARY_NAME}}..."
+      - ./{{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} {{.CLI_ARGS}}
 
-  # Run tests across all packages
   test:
-    desc: "Run tests"
-    cmds:
-    - echo "🧪 Running tests..."
-    - go test ./... -v
+    desc: Run tests with coverage report
+    deps: [test:run, test:coverage]
+    cmds: []
 
-  # Format the Go code using `go fmt`
-  fmt:
-    desc: "Format the code"
+  test:run:
+    desc: Execute Go tests
+    sources:
+      - "**/*.go"
+      - "**/*_test.go"
     cmds:
-    - echo "🧹 Formatting code..."
-    - go fmt ./...
+      - echo "🧪 Running tests..."
+      - go test ./... -v -race
 
-  # Lint the code using `golangci-lint` (ensure it's installed)
+  test:coverage:
+    desc: Generate coverage report
+    deps: [test:run]
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/coverage
+      - go test ./... -coverprofile={{.BUILD_DIR}}/coverage/coverage.out
+      - go tool cover -html={{.BUILD_DIR}}/coverage/coverage.out -o {{.BUILD_DIR}}/coverage/coverage.html
+
   lint:
-    desc: "Lint the code using golangci-lint"
-    cmds:
-    - echo "🔍 Linting code..."
-    - golangci-lint run ./...
+    desc: Lint the code using golangci-lint
+    deps: [lint:check, lint:run]
+    cmds: []
 
-  # Autofix the code: format and fix linting issues
+  lint:check:
+    desc: Ensure 'golangci-lint' is installed
+    preconditions:
+      - sh: which golangci-lint
+        msg: "golangci-lint is not installed. Run 'task deps' first."
+    cmds: []
+
+  lint:run:
+    desc: Execute golangci-lint
+    sources:
+      - "**/*.go"
+      - .golangci.yml
+    cmds:
+      - echo "🔍 Linting code..."
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format the code
+    deps: [fmt:go, fmt:gofmt]
+    cmds: []
+
+  fmt:go:
+    desc: Run 'go fmt'
+    sources:
+      - "**/*.go"
+    cmds:
+      - echo "🧹 Formatting code with go fmt..."
+      - go fmt ./...
+
+  fmt:gofmt:
+    desc: Run 'gofmt -s -w .'
+    cmds:
+      - echo "🧹 Simplifying and formatting code with gofmt..."
+      - gofmt -s -w .
+
   autofix:
-    desc: "Automatically fix formatting and linting issues"
-    cmds:
-    - echo "🛠️ Autofixing code..."
-    - task fmt
-    - echo "🔧 Running golangci-lint with autofix..."
-    - golangci-lint run --fix ./...
-    - echo "🔄 Tidying up dependencies..."
-    - go mod tidy
+    desc: Automatically fix formatting and linting issues
+    deps: [autofix:lint-fix, autofix:tidy]
+    cmds: []
 
-  # Generate documentation using `godoc` and open it in the browser
-  docs:
-    desc: "Generate and view documentation"
+  autofix:lint-fix:
+    desc: Run golangci-lint with autofix
     cmds:
-    - echo "📄 Generating documentation..."
-    - godoc -http=:6060 &
-    - sleep 2
-    # Replace 'open' with 'xdg-open' for Linux or 'start' for Windows
-    - |
-      if [[ "$OSTYPE" == "darwin"* ]]; then
-        open http://localhost:6060/pkg/
-      elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        xdg-open http://localhost:6060/pkg/
-      elif [[ "$OSTYPE" == "msys" ]]; then
-        start http://localhost:6060/pkg/
-      else
-        echo "Please open http://localhost:6060/pkg/ manually in your browser."
-      fi
+      - echo "🔧 Running golangci-lint with autofix..."
+      - golangci-lint run --fix ./...
 
-  # Clean build artifacts
+  autofix:tidy:
+    desc: Tidy up dependencies
+    cmds:
+      - echo "🔄 Tidying up dependencies..."
+      - go mod tidy
+
   clean:
-    desc: "Clean build artifacts"
+    desc: Clean build artifacts
+    deps: [clean:build, clean:coverage]
     cmds:
-    - echo "🧹 Cleaning build artifacts..."
-    - rm -rf {{.BUILD_DIR}}
+      - rm -f .godoc.pid
 
-  # Install project dependencies
+  clean:build:
+    desc: Remove build directory
+    cmds:
+      - echo "🧹 Cleaning build directory..."
+      - rm -rf {{.BUILD_DIR}}
+
+  clean:coverage:
+    desc: Remove coverage reports
+    cmds:
+      - echo "🧹 Cleaning coverage reports..."
+      - rm -rf {{.BUILD_DIR}}/coverage
+
   deps:
-    desc: "Install project dependencies"
-    cmds:
-    - echo "📦 Installing dependencies..."
-    - go mod download
+    desc: Install project dependencies
+    deps: [deps:go-download, deps:install-tools]
+    cmds: []
 
-  # Update project dependencies to the latest versions
+  deps:go-download:
+    desc: Download Go modules
+    cmds:
+      - echo "📦 Downloading Go modules..."
+      - go mod download
+
+  deps:install-tools:
+    desc: Install development tools
+    cmds:
+      - echo "🔧 Installing development tools..."
+      - task: install-tools
+
+  install-tools:
+    desc: Install development tools
+    deps: [install-tools:godoc, install-tools:golangci-lint, install-tools:check-curl]
+    cmds: []
+
+  install-tools:golangci-lint:
+    desc: Install 'golangci-lint'
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
   update-deps:
-    desc: "Update project dependencies"
-    cmds:
-    - echo "🔄 Updating dependencies..."
-    - go get -u ./...
-    - go mod tidy
+    desc: Update project dependencies
+    prompt: This will update all dependencies. Continue?
+    deps: [update-deps:go-get, update-deps:mod-tidy]
+    cmds: []
 
-  # Docker build task (ensure you have a Dockerfile)
-  docker-build:
-    desc: "Build Docker image"
+  update-deps:go-get:
+    desc: Update Go modules
     cmds:
-    - echo "🐳 Building Docker image..."
-    - docker build -t {{.BINARY_NAME}}:latest .
+      - echo "🔄 Updating dependencies with go get..."
+      - go get -u ./...
 
-  # Help task to list all available tasks with descriptions
-  help:
-    desc: "Show help"
+  update-deps:mod-tidy:
+    desc: Tidy Go modules
     cmds:
-    - "task --list --format {{.Name}}: {{.Desc}}"
+      - echo "🔄 Tidy up Go modules..."
+      - go mod tidy
 
-  # Bootstrap task to run the bootstrapping script (if needed)
-  bootstrap:
-    desc: "Run the bootstrapping script"
+  docker:build:
+    desc: Build Docker image with versioning
+    deps: [docker:check, docker:build-image]
+    cmds: []
+
+  docker:check:
+    desc: Ensure Docker is installed
+    preconditions:
+      - sh: docker version
+        msg: "Docker must be installed"
+    cmds: []
+
+  docker:build-image:
+    desc: Execute Docker build
     cmds:
-    - echo "🔧 Running bootstrap.sh..."
-    - ./bootstrap.sh
+      - echo "🐳 Building Docker image..."
+      - |
+        docker build \
+          --build-arg VERSION={{.VERSION}} \
+          --build-arg COMMIT={{.COMMIT}} \
+          --build-arg BUILDTIME={{.BUILDTIME}} \
+          -t {{.BINARY_NAME}}:{{.VERSION}} \
+          -t {{.BINARY_NAME}}:latest .
+
+  release:
+    desc: Create and push a new release
+    deps: [release:precheck, release:create-tag, release:push-tag]
+    cmds: []
+
+  release:precheck:
+    desc: Ensure working directory is clean
+    preconditions:
+      - sh: git diff-index --quiet HEAD
+        msg: "Working directory is not clean. Commit or stash changes first."
+    cmds: []
+
+  release:create-tag:
+    desc: Create Git tag
+    vars:
+      TAG:
+        sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
+    cmds:
+      - echo "🔖 Creating Git tag {{.TAG}}..."
+      - git tag {{.TAG}}
+
+  release:push-tag:
+    desc: Push Git tag to origin
+    vars:
+      TAG:
+        sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
+    cmds:
+      - git push origin {{.TAG}}
+
+  watch:
+    desc: Watch for changes and rebuild
+    watch: true
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    cmds:
+      - task: build

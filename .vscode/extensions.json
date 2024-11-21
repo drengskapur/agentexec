@@ -5,6 +5,8 @@
         "kennylong.kubernetes-yaml-formatter",
         "github.copilot",
         "github.copilot-chat",
-        "golang.go"
+        "golang.go",
+        "foxundermoon.shell-format",
+        "timonwong.shellcheck"
     ]
 }
