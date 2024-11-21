@@ -7,24 +7,28 @@ import (
 // Logger is the global logger instance
 var Logger *zap.Logger
 
-// Setup initializes the global logger
-func Setup(debug bool) error {
+func Setup(debug bool, appName, appVersion string) error {
 	var err error
+	var cfg zap.Config
+
 	if debug {
-		Logger, err = zap.NewDevelopment() // Human-readable logs
+		cfg = zap.NewDevelopmentConfig()
 	} else {
-		Logger, err = zap.NewProduction() // JSON logs optimized for production
+		cfg = zap.NewProductionConfig()
 	}
+
+	// Add default fields
+	cfg.InitialFields = map[string]interface{}{
+		"appName":    appName,
+		"appVersion": appVersion,
+	}
+
+	Logger, err = cfg.Build()
 	if err != nil {
+		Logger = zap.NewExample()
 		return err
 	}
-	zap.ReplaceGlobals(Logger) // Set as global logger for zap.L() and zap.S()
-	return nil
-}
 
-// Close flushes any buffered log entries
-func Close() {
-	if Logger != nil {
-		_ = Logger.Sync()
-	}
+	zap.ReplaceGlobals(Logger)
+	return nil
 }

@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RootCmd is the base command when called without any subcommands.
+// RootCmd is the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "omnivex",
 	Short: "Omnivex is a CLI tool for combining files",

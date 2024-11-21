@@ -9,20 +9,17 @@ import (
 )
 
 func main() {
-	// Initialize the Zap logger for structured logging
 	logger, err := zap.NewProduction()
 	if err != nil {
-		// Fallback to standard library logging if Zap initialization fails
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer func() {
-		if syncErr := logger.Sync(); syncErr != nil {
+		if syncErr := logger.Sync(); syncErr != nil && syncErr.Error() != "invalid argument" {
 			log.Printf("Logger sync failed: %v", syncErr)
 		}
 	}()
 
-	// Execute the main logic with the logger passed in
-	if err := combine.Execute(logger); err != nil { // Pass logger here
-		logger.Fatal("omnivex execution failed", zap.Error(err))
+	if err := combine.Execute(logger); err != nil {
+		logger.Fatal("Execution failed", zap.Error(err))
 	}
 }

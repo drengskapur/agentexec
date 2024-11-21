@@ -1,6 +1,7 @@
 package ignore
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,14 +40,31 @@ func NewGitIgnore(logger *zap.Logger) *GitIgnore {
 func LoadIgnoreFiles(localPath, globalPath string) (*GitIgnore, error) {
 	gi := NewGitIgnore(nil) // Use a default logger if none is provided.
 
-	// Load global ignore file if specified.
+	// Initialize the .combineignore file with default patterns if it doesn't exist
+	if localPath == "" {
+		localPath = "./.combineignore"
+		if _, err := os.Stat(localPath); os.IsNotExist(err) {
+			// Create .combineignore with default ignore patterns if it does not exist
+			defaultPatterns := []string{
+				"ignore",  // Ignore files named 'ignore'
+				".git/",   // Ignore the .git directory
+				".combineignore", // Ignore the .combineignore file itself
+				"debug/", // Ignore the debug directory
+			}
+			if err := os.WriteFile(localPath, []byte(strings.Join(defaultPatterns, "\n")), 0644); err != nil {
+				return nil, fmt.Errorf("failed to create .combineignore file: %w", err)
+			}
+		}
+	}
+
+	// Load global ignore file if specified
 	if globalPath != "" {
 		if err := gi.CompileIgnoreFile(globalPath); err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
 
-	// Load local ignore file if specified.
+	// Load local ignore file if specified
 	if localPath != "" {
 		if err := gi.CompileIgnoreFile(localPath); err != nil && !os.IsNotExist(err) {
 			return nil, err
@@ -59,7 +77,7 @@ func LoadIgnoreFiles(localPath, globalPath string) (*GitIgnore, error) {
 // CompileIgnoreLines compiles a set of ignore pattern lines and adds them to the GitIgnore instance.
 func (gi *GitIgnore) CompileIgnoreLines(lines ...string) {
 	for i, line := range lines {
-		pattern, negate := parsePatternLine(line) // Remove lineNo
+		pattern, negate := parsePatternLine(line, i+1)
 		if pattern != nil {
 			gi.Patterns = append(gi.Patterns, &IgnorePattern{
 				Pattern: pattern,
@@ -119,7 +137,7 @@ func normalizePath(path string) string {
 }
 
 // parsePatternLine processes a line from an ignore file into a compiled regex and a negation flag.
-func parsePatternLine(line string) (*regexp.Regexp, bool) {
+func parsePatternLine(line string, lineNo int) (*regexp.Regexp, bool) {
 	trimmedLine := strings.TrimSpace(line)
 
 	// Ignore empty lines and comments.

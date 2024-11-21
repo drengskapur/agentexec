@@ -1,0 +1,4 @@
+.combineignore
+.git/
+debug/
+ignore
