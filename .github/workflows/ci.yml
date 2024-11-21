@@ -10,6 +10,8 @@ on:
     branches:
       - develop
       - release/**
+  workflow_dispatch:
+
 
 jobs:
   build-test:
