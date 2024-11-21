@@ -39,6 +39,12 @@ type FileContent struct {
 	Content string // Formatted content of the file
 }
 
+// CollectedFiles holds lists of regular and binary files.
+type CollectedFiles struct {
+	Regular []string
+	Binary  []string
+}
+
 // ==============================
 // Execute Function
 // ==============================
@@ -63,6 +69,7 @@ func ExecuteWithArgs(args Arguments, logger *zap.Logger) error {
 		logger.Error("Failed to load default ignore patterns", zap.Error(err))
 		return fmt.Errorf("failed to load default ignore patterns: %w", err)
 	}
+	logger.Debug("Loaded ignore patterns", zap.Int("totalPatterns", len(gi.patterns)))
 
 	// Compile command-line ignore patterns and add them to the ignore parser
 	if len(args.IgnorePatterns) > 0 {
@@ -96,6 +103,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 		zap.Int("maxWorkers", args.MaxWorkers))
 
 	var allFilesToProcess []string
+	var allBinaryFiles []string
 
 	// Collect files to process for each path
 	for _, path := range args.Paths {
@@ -121,7 +129,7 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 				zap.String("dir", absPath),
 				zap.String("parentDir", parentDir))
 
-			files, err := TraverseAndCollectFiles(absPath, gi, args.MaxFileSizeKB, logger, args.Verbose)
+			collected, err := TraverseAndCollectFiles(absPath, gi, args.MaxFileSizeKB, logger, args.Verbose)
 			if err != nil {
 				logger.Warn("Failed to traverse directory",
 					zap.String("dir", absPath),
@@ -130,17 +138,49 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 			}
 			logger.Info("Collected files from directory",
 				zap.String("dir", absPath),
-				zap.Int("fileCount", len(files)))
-			allFilesToProcess = append(allFilesToProcess, files...)
+				zap.Int("regularFileCount", len(collected.Regular)),
+				zap.Int("binaryFileCount", len(collected.Binary)))
+			allFilesToProcess = append(allFilesToProcess, collected.Regular...)
+			allBinaryFiles = append(allBinaryFiles, collected.Binary...)
 		} else if !shouldSkipFile(absPath, info, gi, args.MaxFileSizeKB, logger, args.Verbose) {
 			logger.Debug("Adding single file to process",
 				zap.String("file", absPath))
 			allFilesToProcess = append(allFilesToProcess, absPath)
+		} else {
+			// Determine if the file was skipped due to being binary
+			isBinary, err := isBinaryFile(absPath)
+			if err != nil {
+				logger.Warn("Failed to check if file is binary",
+					zap.String("file", absPath),
+					zap.Error(err))
+			} else if isBinary {
+				allBinaryFiles = append(allBinaryFiles, absPath)
+			}
+		}
+	}
+
+	if len(allBinaryFiles) > 0 {
+		// Inform the user about detected binary files
+		logger.Warn("Detected binary files. These files are not included in the combined output:",
+			zap.Int("binaryFileCount", len(allBinaryFiles)),
+			zap.Strings("binaryFiles", allBinaryFiles))
+
+		// Prompt the user to decide whether to continue
+		shouldContinue, err := promptUser(fmt.Sprintf("Detected %d binary files. Do you want to continue and exclude these files? (y/n): ", len(allBinaryFiles)))
+		if err != nil {
+			logger.Error("Failed to read user input",
+				zap.Error(err))
+			return fmt.Errorf("failed to read user input: %w", err)
+		}
+
+		if !shouldContinue {
+			logger.Info("User chose to abort the combine process due to detected binary files.")
+			return nil
 		}
 	}
 
 	if len(allFilesToProcess) == 0 {
-		logger.Warn("No files to process")
+		logger.Warn("No files to process after filtering.")
 		return nil
 	}
 
@@ -202,7 +242,54 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	})
 	logger.Debug("Sorted processed files")
 
-	// Create output file
+	// Generate tree structure
+	logger.Info("Generating tree structure")
+
+	treeBuilder := strings.Builder{}
+	for _, path := range args.Paths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			logger.Warn("Failed to get absolute path for tree",
+				zap.String("path", path),
+				zap.Error(err))
+			continue
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil {
+			logger.Warn("Cannot stat path for tree", zap.String("path", absPath), zap.Error(err))
+			continue
+		}
+
+		if info.IsDir() {
+			// Add the absolute path with a trailing '/' as the first line of the tree
+			treeBuilder.WriteString(absPath + "/\n")
+
+			tree := GenerateTreeStructure(absPath, absPath, gi, "", logger)
+			if tree != "" {
+				treeBuilder.WriteString(tree)
+				treeBuilder.WriteString("\n")
+			}
+		} else {
+			relPath, relErr := filepath.Rel(filepath.Dir(absPath), absPath)
+			if relErr != nil {
+				relPath = absPath // Fallback to absolute path if relative path fails
+			}
+			relPath = normalizePath(relPath)
+			treeBuilder.WriteString(relPath + "\n")
+		}
+	}
+	treeContent := treeBuilder.String()
+
+	// Write tree structure to tree.txt
+	logger.Info("Writing tree structure to tree.txt", zap.String("treeFile", args.Tree))
+	if err := os.WriteFile(args.Tree, []byte(treeContent), 0644); err != nil {
+		logger.Error("Failed to write tree structure", zap.String("treeFile", args.Tree), zap.Error(err))
+		return fmt.Errorf("failed to write tree structure: %w", err)
+	}
+
+	// Create combined.txt and write tree at the top
+	logger.Info("Writing combined content to combined.txt", zap.String("combinedFile", args.Output))
 	if err := os.MkdirAll(filepath.Dir(args.Output), 0755); err != nil {
 		logger.Error("Failed to create output directory",
 			zap.String("dir", filepath.Dir(args.Output)),
@@ -225,14 +312,20 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 		}
 	}()
 
-	logger.Debug("Writing combined content to output file",
-		zap.String("file", args.Output))
-
-	// Write combined contents
 	writer := bufio.NewWriter(outFile)
+
+	// Write tree content first
+	if _, err := writer.WriteString(treeContent); err != nil {
+		logger.Error("Failed to write tree content to combined file",
+			zap.String("file", args.Output),
+			zap.Error(err))
+		return fmt.Errorf("failed to write tree content: %w", err)
+	}
+
+	// Write combined file contents
 	for _, content := range combinedContents {
 		if _, err := writer.WriteString(content.Content); err != nil {
-			logger.Error("Failed to write content to file",
+			logger.Error("Failed to write content to combined file",
 				zap.String("file", args.Output),
 				zap.String("contentPath", content.Path),
 				zap.Error(err))
@@ -250,52 +343,24 @@ func CombineFiles(args Arguments, gi IgnoreParser, logger *zap.Logger) error {
 	logger.Info("Successfully combined files",
 		zap.String("outputFile", args.Output),
 		zap.Int("totalFiles", len(combinedContents)))
-
-	// Generate and write tree structure
-	logger.Info("Writing tree structure to file", zap.String("tree", args.Tree))
-
-	treeBuilder := strings.Builder{}
-	for _, path := range args.Paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			logger.Warn("Cannot stat path for tree", zap.String("path", path), zap.Error(err))
-			continue
-		}
-
-		if info.IsDir() {
-			tree := GenerateTreeStructure(path, path, gi, "", logger)
-			treeBuilder.WriteString(tree)
-			treeBuilder.WriteString("\n")
-		} else {
-			relPath, relErr := filepath.Rel(filepath.Dir(path), path)
-			if relErr != nil {
-				relPath = path // Fallback to absolute path if relative path fails
-			}
-			relPath = normalizePath(relPath)
-			treeBuilder.WriteString(relPath)
-			treeBuilder.WriteString("\n")
-		}
-	}
-	treeContent := treeBuilder.String()
-	if err := os.WriteFile(args.Tree, []byte(treeContent), 0644); err != nil {
-		logger.Error("Failed to write tree structure", zap.String("tree", args.Tree), zap.Error(err))
-		return fmt.Errorf("failed to write tree structure: %w", err)
-	}
-
 	return nil
 }
+
+// ==============================
+// File Processing Functions
+// ==============================
 
 // ProcessSingleFile reads and formats the content of a single file.
 func ProcessSingleFile(filePath, parentDir string, logger *zap.Logger) (FileContent, error) {
 	logger.Debug("Processing file",
-		zap.String("file", filePath),
+		zap.String("filePath", filePath),
 		zap.String("parentDir", parentDir))
 
-	separatorLine := "# " + strings.Repeat("-", 62) + " #"
+	separatorLine := "# " + strings.Repeat("-", 78)
 	relativePath, err := filepath.Rel(parentDir, filePath)
 	if parentDir == "" || err != nil {
-		logger.Warn("Unable to determine relative path, using absolute",
-			zap.String("file", filePath),
+		logger.Warn("Unable to determine relative path, using absolute path",
+			zap.String("filePath", filePath),
 			zap.String("parentDir", parentDir),
 			zap.Error(err))
 		relativePath = filePath
@@ -305,18 +370,18 @@ func ProcessSingleFile(filePath, parentDir string, logger *zap.Logger) (FileCont
 	header := fmt.Sprintf("\n\n%s\n# Source: %s #\n\n", separatorLine, relativePath)
 
 	logger.Debug("Reading file content",
-		zap.String("file", filePath))
+		zap.String("filePath", filePath))
 	fileContent, err := os.ReadFile(filePath)
 	if err != nil {
 		logger.Error("Failed to read file",
-			zap.String("file", filePath),
+			zap.String("filePath", filePath),
 			zap.Error(err))
 		return FileContent{}, fmt.Errorf("error reading file %s: %w", filePath, err)
 	}
 
-	logger.Debug("Successfully processed file",
-		zap.String("file", filePath),
-		zap.Int("contentBytes", len(fileContent)))
+	logger.Debug("Successfully read file content",
+		zap.String("filePath", filePath),
+		zap.Int("contentSizeBytes", len(fileContent)))
 
 	return FileContent{
 		Path:    relativePath,
@@ -330,24 +395,26 @@ func Worker(id int, jobs <-chan string, results chan<- FileContent, parentDir st
 	logger.Debug("Worker started", zap.Int("workerID", id))
 
 	for file := range jobs {
-		logger.Debug("Worker processing file",
+		logger.Debug("Worker received file to process",
 			zap.Int("workerID", id),
-			zap.String("file", file))
+			zap.String("filePath", file))
 
-		if content, err := ProcessSingleFile(file, parentDir, logger); err == nil {
-			results <- content
-			logger.Debug("Worker completed file processing",
-				zap.Int("workerID", id),
-				zap.String("file", file))
-		} else {
+		content, err := ProcessSingleFile(file, parentDir, logger)
+		if err != nil {
 			logger.Error("Worker failed to process file",
 				zap.Int("workerID", id),
-				zap.String("file", file),
+				zap.String("filePath", file),
 				zap.Error(err))
+			continue // Optionally, decide whether to stop processing on error
 		}
+
+		results <- content
+		logger.Debug("Worker successfully processed file",
+			zap.Int("workerID", id),
+			zap.String("filePath", file))
 	}
 
-	logger.Debug("Worker finished", zap.Int("workerID", id))
+	logger.Debug("Worker finished processing", zap.Int("workerID", id))
 }
 
 // ==============================
@@ -355,67 +422,87 @@ func Worker(id int, jobs <-chan string, results chan<- FileContent, parentDir st
 // ==============================
 
 // TraverseAndCollectFiles collects files to process based on the ignore rules, size limits, and binary detection
-func TraverseAndCollectFiles(parentDir string, gi IgnoreParser, maxFileSizeKB int, logger *zap.Logger, verbose bool) ([]string, error) {
-	var files []string
+func TraverseAndCollectFiles(parentDir string, gi IgnoreParser, maxFileSizeKB int, logger *zap.Logger, verbose bool) (CollectedFiles, error) {
+	var collected CollectedFiles
+	logger.Debug("Starting file traversal and collection",
+		zap.String("parentDir", parentDir),
+		zap.Int("maxFileSizeKB", maxFileSizeKB))
+
 	err := filepath.WalkDir(parentDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			logger.Warn("Error accessing path", zap.String("path", path), zap.Error(err))
+			logger.Warn("Error accessing path during traversal",
+				zap.String("path", path),
+				zap.Error(err))
 			return nil // Ignore errors accessing files or directories
 		}
 
 		relPath, _ := filepath.Rel(parentDir, path)
 		relPath = normalizePath(relPath)
 
+		logger.Debug("Evaluating path against ignore patterns",
+			zap.String("path", path),
+			zap.String("relPath", relPath))
+
 		if d.IsDir() && gi.MatchesPath(relPath) {
+			logger.Debug("Skipping ignored directory during traversal",
+				zap.String("directory", path))
 			return filepath.SkipDir // Skip ignored directories
 		}
 
 		if !d.IsDir() && !gi.MatchesPath(relPath) {
-			// Quick check for common binary extensions first
-			if isCommonBinaryExtension(path) {
-				if verbose {
-					logger.Debug("Skipping common binary file", zap.String("file", path))
-				}
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				logger.Warn("Failed to get file info", zap.String("file", path), zap.Error(err))
-				return nil
-			}
-
-			// Check file size first
-			if info.Size() > int64(maxFileSizeKB)*1024 {
-				if verbose {
-					logger.Debug("Skipping file due to size limit",
-						zap.String("file", path),
-						zap.Int64("sizeBytes", info.Size()))
-				}
-				return nil
-			}
-
-			// Only check for binary content if it passes other checks
+			// Check if the file is a binary file
 			isBinary, err := isBinaryFile(path)
 			if err != nil {
-				logger.Warn("Failed to check if file is binary",
-					zap.String("file", path),
+				logger.Warn("Failed to check if file is binary during traversal",
+					zap.String("filePath", path),
 					zap.Error(err))
 				return nil
 			}
 
 			if isBinary {
+				collected.Binary = append(collected.Binary, path)
 				if verbose {
-					logger.Debug("Skipping binary file", zap.String("file", path))
+					logger.Debug("Detected binary file during traversal",
+						zap.String("filePath", path))
+				}
+				return nil // Do not include binary files in the regular list
+			}
+
+			// Check file size
+			info, err := d.Info()
+			if err != nil {
+				logger.Warn("Failed to get file info during traversal",
+					zap.String("filePath", path),
+					zap.Error(err))
+				return nil
+			}
+
+			if info.Size() > int64(maxFileSizeKB)*1024 {
+				if verbose {
+					logger.Debug("Skipping file due to size limit during traversal",
+						zap.String("filePath", path),
+						zap.Int64("sizeBytes", info.Size()))
 				}
 				return nil
 			}
 
-			files = append(files, path)
+			// Add to regular files
+			collected.Regular = append(collected.Regular, path)
+			logger.Debug("Added file to processing list during traversal",
+				zap.String("filePath", path))
 		}
+
 		return nil
 	})
-	return files, err
+	if err != nil {
+		logger.Error("Error during file traversal", zap.Error(err))
+	} else {
+		logger.Debug("Completed file traversal and collection",
+			zap.Int("regularFiles", len(collected.Regular)),
+			zap.Int("binaryFiles", len(collected.Binary)))
+	}
+
+	return collected, err
 }
 
 // ==============================
@@ -472,6 +559,19 @@ func shouldSkipFile(path string, info fs.FileInfo, gi IgnoreParser, maxFileSizeK
 	}
 
 	return false
+}
+
+// promptUser displays a message and waits for the user to enter 'y' or 'n'.
+// Returns true if the user enters 'y' or 'yes' (case-insensitive), false otherwise.
+func promptUser(message string) (bool, error) {
+	fmt.Print(message)
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes", nil
 }
 
 // normalizePath converts the OS-specific path separators to forward slashes.
@@ -646,36 +746,93 @@ func LoadIgnoreFiles(localPath, globalPath string, logger *zap.Logger) (*GitIgno
 	// Initialize the .combineignore file with default patterns if it doesn't exist
 	if localPath == "" {
 		localPath = "./.combineignore"
-		if _, err := os.Stat(localPath); os.IsNotExist(err) {
-			// Create .combineignore with default ignore patterns if it does not exist
-			defaultPatterns := []string{
-				".git/",          // Ignore the .git directory
-				".combineignore", // Ignore the .combineignore file itself
-				"debug/",         // Ignore the debug directory
+		logger.Debug("Local ignore path not specified; defaulting to ./.combineignore")
+		absLocalPath, err := filepath.Abs(localPath)
+		if err != nil {
+			gi.logger.Warn("Failed to get absolute path for default local ignore file",
+				zap.String("filePath", localPath),
+				zap.Error(err))
+		} else {
+			if _, err := os.Stat(absLocalPath); os.IsNotExist(err) {
+				// Create .combineignore with default ignore patterns if it does not exist
+				defaultPatterns := []string{
+					".git/",          // Ignore the .git directory
+					".combineignore", // Ignore the .combineignore file itself
+					"debug/",         // Ignore the debug directory
+				}
+				if err := os.WriteFile(absLocalPath, []byte(strings.Join(defaultPatterns, "\n")), 0644); err != nil {
+					gi.logger.Error("Failed to create .combineignore file",
+						zap.String("file", absLocalPath),
+						zap.Error(err))
+					return nil, fmt.Errorf("failed to create .combineignore file: %w", err)
+				}
+				gi.logger.Info("Created default .combineignore file",
+					zap.String("file", absLocalPath),
+					zap.String("location", absLocalPath))
+			} else {
+				gi.logger.Debug("Default .combineignore file already exists",
+					zap.String("file", absLocalPath),
+					zap.String("location", absLocalPath))
 			}
-			if err := os.WriteFile(localPath, []byte(strings.Join(defaultPatterns, "\n")), 0644); err != nil {
-				gi.logger.Error("Failed to create .combineignore file", zap.String("file", localPath), zap.Error(err))
-				return nil, fmt.Errorf("failed to create .combineignore file: %w", err)
-			}
-			gi.logger.Info("Created default .combineignore file", zap.String("file", localPath))
 		}
 	}
 
 	// Load global ignore file if specified
 	if globalPath != "" {
-		if err := gi.CompileIgnoreFile(globalPath); err != nil && !os.IsNotExist(err) {
-			gi.logger.Error("Failed to compile global ignore file", zap.String("file", globalPath), zap.Error(err))
-			return nil, err
+		absGlobalPath, err := filepath.Abs(globalPath)
+		if err != nil {
+			gi.logger.Warn("Failed to get absolute path for global ignore file",
+				zap.String("globalPath", globalPath),
+				zap.Error(err))
+		} else {
+			logger.Debug("Attempting to load global ignore file",
+				zap.String("file", absGlobalPath))
+			if err := gi.CompileIgnoreFile(absGlobalPath); err != nil {
+				if os.IsNotExist(err) {
+					gi.logger.Info("Global ignore file does not exist and will be skipped",
+						zap.String("file", absGlobalPath))
+				} else {
+					gi.logger.Error("Failed to compile global ignore file",
+						zap.String("file", absGlobalPath),
+						zap.Error(err))
+					return nil, err
+				}
+			} else {
+				gi.logger.Info("Successfully loaded global ignore file",
+					zap.String("file", absGlobalPath))
+			}
 		}
 	}
 
 	// Load local ignore file if specified
 	if localPath != "" {
-		if err := gi.CompileIgnoreFile(localPath); err != nil && !os.IsNotExist(err) {
-			gi.logger.Error("Failed to compile local ignore file", zap.String("file", localPath), zap.Error(err))
-			return nil, err
+		absLocalPath, err := filepath.Abs(localPath)
+		if err != nil {
+			gi.logger.Warn("Failed to get absolute path for local ignore file",
+				zap.String("localPath", localPath),
+				zap.Error(err))
+		} else {
+			logger.Debug("Attempting to load local ignore file",
+				zap.String("file", absLocalPath))
+			if err := gi.CompileIgnoreFile(absLocalPath); err != nil {
+				if os.IsNotExist(err) {
+					gi.logger.Info("Local ignore file does not exist and will be skipped",
+						zap.String("file", absLocalPath))
+				} else {
+					gi.logger.Error("Failed to compile local ignore file",
+						zap.String("file", absLocalPath),
+						zap.Error(err))
+					return nil, err
+				}
+			} else {
+				gi.logger.Info("Successfully loaded local ignore file",
+					zap.String("file", absLocalPath))
+			}
 		}
 	}
+
+	gi.logger.Debug("Finished loading ignore files",
+		zap.Int("totalPatterns", len(gi.patterns)))
 
 	return gi, nil
 }
@@ -693,7 +850,10 @@ func (gi *GitIgnore) CompileIgnoreLines(lines ...string) {
 				Line:    line,
 			}
 			gi.patterns = append(gi.patterns, ip)
-			gi.logger.Debug("Compiled ignore pattern", zap.Int("lineNo", ip.LineNo), zap.String("pattern", ip.Line), zap.Bool("negate", ip.Negate))
+			gi.logger.Debug("Compiled ignore pattern",
+				zap.Int("lineNo", ip.LineNo),
+				zap.String("pattern", ip.Line),
+				zap.Bool("negate", ip.Negate))
 		}
 	}
 }
@@ -701,17 +861,24 @@ func (gi *GitIgnore) CompileIgnoreLines(lines ...string) {
 // CompileIgnoreFile reads an ignore file from the given path, parses its lines,
 // and compiles them into the GitIgnore instance.
 func (gi *GitIgnore) CompileIgnoreFile(filePath string) error {
+	gi.logger.Debug("Starting to compile ignore file", zap.String("filePath", filePath))
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			gi.logger.Warn("Ignore file does not exist", zap.String("filePath", filePath))
-			return nil // It's acceptable for the ignore file to not exist
+			gi.logger.Info("Ignore file does not exist and will be skipped",
+				zap.String("filePath", filePath))
+			return nil
 		}
-		gi.logger.Error("Failed to read ignore file", zap.String("filePath", filePath), zap.Error(err))
+		gi.logger.Error("Failed to read ignore file",
+			zap.String("filePath", filePath),
+			zap.Error(err))
 		return err
 	}
 
 	lines := strings.Split(string(content), "\n")
+	gi.logger.Debug("Read ignore file lines",
+		zap.String("filePath", filePath),
+		zap.Int("lineCount", len(lines)))
 	for i, line := range lines {
 		pattern, negate := parsePatternLine(line, i+1, gi.logger)
 		if pattern != nil {
@@ -722,10 +889,20 @@ func (gi *GitIgnore) CompileIgnoreFile(filePath string) error {
 				Line:    line,
 			}
 			gi.patterns = append(gi.patterns, ip)
-			gi.logger.Debug("Compiled ignore pattern from file", zap.String("filePath", filePath), zap.Int("lineNo", ip.LineNo), zap.String("pattern", ip.Line), zap.Bool("negate", ip.Negate))
+			gi.logger.Debug("Compiled ignore pattern from file",
+				zap.String("filePath", filePath),
+				zap.Int("lineNo", ip.LineNo),
+				zap.String("pattern", ip.Line),
+				zap.Bool("negate", ip.Negate))
+		} else {
+			gi.logger.Debug("Skipped empty or comment line in ignore file",
+				zap.String("filePath", filePath),
+				zap.Int("lineNo", i+1))
 		}
 	}
-	gi.logger.Info("Compiled ignore patterns from file", zap.String("filePath", filePath), zap.Int("patternCount", len(lines)))
+	gi.logger.Info("Compiled ignore patterns from file",
+		zap.String("filePath", filePath),
+		zap.Int("patternCount", len(lines)))
 	return nil
 }
 
@@ -949,10 +1126,12 @@ func GenerateTreeStructure(directory, parentDir string, gi IgnoreParser, prefix 
 
 		if entry.IsDir() {
 			if gi.MatchesPath(relPath) {
-				logger.Debug("Skipping ignored directory in tree", zap.String("directory", entryPath))
+				logger.Debug("Skipping ignored directory in tree",
+					zap.String("directory", entryPath))
 				continue // Skip ignored directories
 			}
-			output = append(output, fmt.Sprintf("%s%s%s", prefix, connector, entry.Name()))
+			// Append '/' to directory names
+			output = append(output, fmt.Sprintf("%s%s%s/", prefix, connector, entry.Name()))
 			subtree := GenerateTreeStructure(entryPath, parentDir, gi, prefix+extension, logger)
 			if subtree != "" {
 				output = append(output, subtree)

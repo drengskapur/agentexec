@@ -142,3 +142,4 @@ update.sh
 vendor/
 venv/
 yarn.lock
+omnivex
