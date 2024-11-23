@@ -1,10 +1,6 @@
-Here’s a comprehensive README that outlines the implementation plan for **Omnivex**. This README emphasizes simplicity, utilizes effective design patterns, and ensures a high-quality, user-friendly TUI experience.
+# AgentExec
 
----
-
-# Omnivex
-
-Omnivex is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
+AgentExec is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
 
 ## Features
 
@@ -51,8 +47,8 @@ To get started with Omnivex, clone the repository and use the included `Makefile
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/omnivex.git
-cd omnivex
+git clone https://github.com/drengskapur/agentexec.git
+cd agentexec
 
 # Install dependencies and build
 make install-deps
