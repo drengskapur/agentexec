@@ -256,6 +256,7 @@ tasks:
     desc: Install all dependencies
     cmds:
       - task: deps:go-download
+      - task: deps:vendor
       - task: install-tools
 
   deps:go-download:
@@ -263,6 +264,12 @@ tasks:
     cmds:
       - echo "📦 Downloading Go modules..."
       - go mod download
+
+  deps:vendor:
+    desc: Vendor dependencies
+    cmds:
+      - echo "📦 Vendoring dependencies..."
+      - go mod vendor
 
   install-tools:
     desc: Install development tools
