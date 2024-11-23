@@ -1,5 +1,6 @@
 {
     "yaml.schemas": {
-        "https://taskfile.dev/schema.json": "file:///workspaces/agentexec/Taskfile.yml"
+        "https://taskfile.dev/schema.json": "file:///workspaces/agentexec/Taskfile.yml",
+        "https://goreleaser.com/static/schema.json": "file:///workspaces/agentexec/.github/workflows/.goreleaser.yaml"
     }
 }

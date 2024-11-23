@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" 
+           Name="AgentExec" 
+           Language="1033" 
+           Version="!(bind.FileVersion.AgentExecEXE)"
+           Manufacturer="AgentExec" 
+           UpgradeCode="$(env.INSTALLER_GUID)">
+    <Package InstallerVersion="500" 
+             Compressed="yes" 
+             InstallScope="perMachine"
+             Description="AgentExec CLI Installation Package"
+             Comments="Installs AgentExec CLI to your system" />
+    
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    
+    <Feature Id="ProductFeature" Title="AgentExec" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="PathEnvironmentComponent" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="AgentExec">
+          <Component Id="PathEnvironmentComponent" Guid="$(env.COMPONENT_GUID)">
+            <Environment Id="PATH" 
+                        Name="PATH" 
+                        Value="[INSTALLFOLDER]" 
+                        Permanent="no" 
+                        Part="last" 
+                        Action="set" 
+                        System="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="AgentExecBinary" Guid="*">
+        <File Id="AgentExecEXE" 
+              Name="agentexec.exe" 
+              Source="$(env.BIN_PATH)"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Product>
+</Wix>

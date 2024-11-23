@@ -1,167 +1,262 @@
+# =============================================================================
+# Global Configuration
+# =============================================================================
 version: '3'
 
-# Global configurations
 output: prefixed
 silent: false
 interval: 5s
 set: [pipefail]
 shopt: [globstar]
 
-# Global variables for reusability
+# =============================================================================
+# Variables
+# =============================================================================
 vars:
   BINARY_NAME: agentexec
   BUILD_DIR: build
   MAIN_GO: main.go
   VERSION:
-    sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
+    sh: git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.1"
   COMMIT:
     sh: git rev-parse --short HEAD
   BUILDTIME:
     sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
   LDFLAGS: >-
+    -s -w
     -X 'agentexec/pkg/version.Version={{.VERSION}}'
     -X 'agentexec/pkg/version.Commit={{.COMMIT}}'
     -X 'agentexec/pkg/version.BuildTime={{.BUILDTIME}}'
-  exeExt:
-    sh: |
-      case "{{.OS}}" in
-        windows) echo ".exe" ;;
-        *) echo "" ;;
-      esac
 
+# =============================================================================
 # Tasks
+# =============================================================================
 tasks:
   default:
     desc: Build the application
-    deps: [lint, test]
     cmds:
       - task: build
 
+# =============================================================================
+# Build Tasks
+# =============================================================================
   build:
-    desc: Build the Go application with versioning
+    desc: Build for the current platform
+    deps: [build:check-deps]
     preconditions:
       - sh: go version
         msg: "Go must be installed"
     cmds:
-      - echo "📦 Cleaning previous build artifacts..."
-      - rm -rf {{.BUILD_DIR}}
+      - echo "📦 Building {{.BINARY_NAME}} for current platform..."
       - mkdir -p {{.BUILD_DIR}}
-      - echo "📦 Building {{.BINARY_NAME}}..."
-      - go build -ldflags="{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} {{.MAIN_GO}}
-      - echo "🔗 Adding {{.BINARY_NAME}} to PATH..."
-      - mkdir -p /home/codespace/.local/bin
-      - cp {{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} /home/codespace/.local/bin
+      - go build -trimpath -ldflags="{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}
+      - echo "✅ Build complete"
+      - mkdir -p $HOME/.local/bin
+      - cp {{.BUILD_DIR}}/{{.BINARY_NAME}} $HOME/.local/bin/{{.BINARY_NAME}}
       - agentexec version
 
-  run:
-    desc: Run the Go application
-    deps: [build]
-    interactive: true
+  build:check-deps:
+    desc: Check and install build dependencies
+    vars:
+      COMPRESS: gzip  # Default to gzip
     cmds:
-      - echo "🏃 Running {{.BINARY_NAME}}..."
-      - ./{{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} {{.CLI_ARGS}}
+      - |
+        # Check for pigz
+        if command -v pigz >/dev/null 2>&1; then
+          echo "✅ pigz is available"
+          set -- -E COMPRESS=pigz
+        else
+          echo "⚠️  pigz not found, installing..."
+          task install-tools:pigz
+          if command -v pigz >/dev/null 2>&1; then
+            set -- -E COMPRESS=pigz
+          else
+            echo "⚠️  Using gzip as fallback"
+            set -- -E COMPRESS=gzip
+          fi
+        fi
 
+        # Check for zip (needed for Windows builds)
+        if ! command -v zip >/dev/null 2>&1; then
+          echo "⚠️  zip not found, installing..."
+          task install-tools:zip
+        fi
+
+  build:cross:
+    desc: Build binaries for multiple platforms
+    deps: [clean:build, build:check-deps]
+    vars:
+      COMPRESS:
+        sh: command -v pigz >/dev/null 2>&1 && echo "pigz" || echo "gzip"
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - |
+        set -e  # Exit immediately if a command exits with a non-zero status
+        echo "📦 Using {{.COMPRESS}} for compression"
+
+        # Create source archive first
+        echo "📦 Creating source archive..."
+        tar --exclude='.git' \
+            --exclude='{{.BUILD_DIR}}' \
+            --exclude='dist' \
+            -cf - . | {{.COMPRESS}} > "{{.BUILD_DIR}}/{{.BINARY_NAME}}-src.tar.gz"
+
+        # Initialize SHASUMS256.txt with header
+        echo "# {{.BINARY_NAME}} checksums" > "{{.BUILD_DIR}}/SHASUMS256.txt"
+
+        # Add checksum for source archive with only the filename
+        checksum=$(shasum -a 256 "{{.BUILD_DIR}}/{{.BINARY_NAME}}-src.tar.gz" | awk '{print $1}')
+        filename="{{.BINARY_NAME}}-src.tar.gz"
+        echo "$checksum  $filename" >> "{{.BUILD_DIR}}/SHASUMS256.txt"
+
+        # Define the build matrix
+        BUILDS=(
+          "darwin amd64 tar.gz"
+          "darwin arm64 tar.gz"
+          "linux 386 tar.gz"
+          "linux amd64 tar.gz"
+          "linux arm64 tar.gz"
+          "linux arm tar.gz"
+          "windows 386 zip"
+          "windows amd64 zip"
+          "windows arm64 zip"
+        )
+
+        for build in "${BUILDS[@]}"; do
+          read -r os arch format <<< "$build"
+          
+          echo "🔨 Building for $os/$arch..."
+          
+          # Set binary extension for Windows
+          bin_ext=""
+          if [ "$os" = "windows" ]; then
+            bin_ext=".exe"
+          fi
+
+          # Determine output binary name and path
+          binary_name="{{.BINARY_NAME}}-${os}-${arch}${bin_ext}"
+          binary_path="{{.BUILD_DIR}}/${binary_name}"
+
+          # Build the binary in the project root
+          GOOS=$os GOARCH=$arch go build \
+            -trimpath \
+            -mod=vendor \
+            -ldflags="{{.LDFLAGS}}" \
+            -o "$binary_path" \
+            .
+
+          # Create archive name
+          output_name="{{.BINARY_NAME}}-${os}-${arch}"
+          if [ "$os" = "linux" ] && [ "$arch" = "arm" ]; then
+            output_name="{{.BINARY_NAME}}-${os}-armv6l"
+          fi
+
+          # Create archive path relative to BUILD_DIR
+          archive_name="${output_name}.${format}"
+          archive_path="{{.BUILD_DIR}}/${archive_name}"
+
+          # Create archive
+          if [ "$format" = "zip" ]; then
+            zip -q "$archive_path" "$binary_path"
+          else
+            tar -cf - "$binary_path" | {{.COMPRESS}} > "$archive_path"
+          fi
+
+          # Add to SHASUMS256.txt with only the filename
+          checksum=$(shasum -a 256 "$archive_path" | awk '{print $1}')
+          filename="${output_name}.${format}"
+          echo "$checksum  $filename" >> "{{.BUILD_DIR}}/SHASUMS256.txt"
+
+          # Clean up binary
+          rm "$binary_path"
+        done
+
+        # Sort checksums (preserve header)
+        {
+          head -n1 "{{.BUILD_DIR}}/SHASUMS256.txt"
+          tail -n +2 "{{.BUILD_DIR}}/SHASUMS256.txt" | sort
+        } > "{{.BUILD_DIR}}/SHASUMS256.txt.tmp"
+        mv "{{.BUILD_DIR}}/SHASUMS256.txt.tmp" "{{.BUILD_DIR}}/SHASUMS256.txt"
+
+      - echo "✅ Cross-compilation complete. Archives are in {{.BUILD_DIR}}/"
+      - task: build:verify
+
+  build:verify:
+    desc: Verify builds
+    cmds:
+      - |
+        set -e  # Exit immediately if a command exits with a non-zero status
+        echo "🔍 Verifying checksums..."
+
+        # Change directory to BUILD_DIR for relative checksum verification
+        cd "{{.BUILD_DIR}}"
+
+        # Verify checksums
+        shasum -a 256 -c SHASUMS256.txt
+
+        echo "📁 File listing in {{.BUILD_DIR}}:"
+        ls -lh
+
+
+
+# =============================================================================
+# Test Tasks
+# =============================================================================
   test:
-    desc: Run tests with coverage report
-    deps: [test:run, test:coverage]
-    cmds: []
-
-  test:run:
-    desc: Execute Go tests
-    sources:
-      - "**/*.go"
-      - "**/*_test.go"
+    desc: Run tests with coverage
     cmds:
-      - echo "🧪 Running tests..."
-      - go test ./... -v -race
+      - echo "🧪 Running tests with coverage..."
+      - mkdir -p coverage
+      - |
+        go test ./... -race -coverprofile=coverage/coverage.out \
+          && go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
-  test:coverage:
-    desc: Generate coverage report
-    deps: [test:run]
-    cmds:
-      - mkdir -p {{.BUILD_DIR}}/coverage
-      - go test ./... -coverprofile={{.BUILD_DIR}}/coverage/coverage.out
-      - go tool cover -html={{.BUILD_DIR}}/coverage/coverage.out -o {{.BUILD_DIR}}/coverage/coverage.html
-
+# =============================================================================
+# Code Quality Tasks
+# =============================================================================
   lint:
-    desc: Lint the code using golangci-lint
-    deps: [lint:check, lint:run]
-    cmds: []
-
-  lint:check:
-    desc: Ensure 'golangci-lint' is installed
-    preconditions:
-      - sh: which golangci-lint
-        msg: "golangci-lint is not installed. Run 'task deps' first."
-    cmds: []
-
-  lint:run:
-    desc: Execute golangci-lint
-    sources:
-      - "**/*.go"
-      - .golangci.yml
+    desc: Run linters
+    deps: [lint:check]
     cmds:
       - echo "🔍 Linting code..."
       - golangci-lint run ./...
+      - task: fmt
+
+  lint:check:
+    desc: Ensure linter is installed
+    preconditions:
+      - sh: which golangci-lint
+        msg: "golangci-lint is not installed. Run 'task deps' first."
 
   fmt:
-    desc: Format the code
-    deps: [fmt:go, fmt:gofmt]
-    cmds: []
-
-  fmt:go:
-    desc: Run 'go fmt'
-    sources:
-      - "**/*.go"
+    desc: Format code
     cmds:
-      - echo "🧹 Formatting code with go fmt..."
+      - echo "🧹 Formatting code..."
       - go fmt ./...
-
-  fmt:gofmt:
-    desc: Run 'gofmt -s -w .'
-    cmds:
-      - echo "🧹 Simplifying and formatting code with gofmt..."
       - gofmt -s -w .
 
-  autofix:
-    desc: Automatically fix formatting and linting issues
-    deps: [autofix:lint-fix, autofix:tidy]
-    cmds: []
-
-  autofix:lint-fix:
-    desc: Run golangci-lint with autofix
-    cmds:
-      - echo "🔧 Running golangci-lint with autofix..."
-      - golangci-lint run --fix ./...
-
-  autofix:tidy:
-    desc: Tidy up dependencies
-    cmds:
-      - echo "🔄 Tidying up dependencies..."
-      - go mod tidy
-
+# =============================================================================
+# Cleanup Tasks
+# =============================================================================
   clean:
-    desc: Clean build artifacts
-    deps: [clean:build, clean:coverage]
+    desc: Clean all artifacts
     cmds:
-      - rm -f .godoc.pid
+      - echo "🧹 Cleaning all artifacts..."
+      - rm -rf {{.BUILD_DIR}} coverage dist
 
   clean:build:
-    desc: Remove build directory
+    desc: Clean build directory
     cmds:
-      - echo "🧹 Cleaning build directory..."
       - rm -rf {{.BUILD_DIR}}
 
-  clean:coverage:
-    desc: Remove coverage reports
-    cmds:
-      - echo "🧹 Cleaning coverage reports..."
-      - rm -rf {{.BUILD_DIR}}/coverage
-
+# =============================================================================
+# Installation & Setup Tasks
+# =============================================================================
   deps:
-    desc: Install project dependencies
-    deps: [deps:go-download, deps:install-tools]
-    cmds: []
+    desc: Install all dependencies
+    cmds:
+      - task: deps:go-download
+      - task: install-tools
 
   deps:go-download:
     desc: Download Go modules
@@ -169,116 +264,151 @@ tasks:
       - echo "📦 Downloading Go modules..."
       - go mod download
 
-  deps:install-tools:
-    desc: Install development tools
-    deps: [install-tools:godoc, install-tools:golangci-lint, install-tools:check-curl]
-    cmds: []
-
   install-tools:
     desc: Install development tools
-    deps: [install-tools:godoc, install-tools:golangci-lint, install-tools:check-curl]
-    cmds: []
-
-  install-tools:golangci-lint:
-    desc: Install 'golangci-lint'
-    cmds:
-      - echo "🔧 Installing 'golangci-lint'..."
-      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-  install-tools:godoc:
-    desc: Install 'godoc' tool
-    cmds:
-      - echo "🔧 Installing 'godoc'..."
-      - go install golang.org/x/tools/cmd/godoc@latest
-
-  install-tools:check-curl:
-    desc: Ensure 'curl' is installed
     cmds:
       - |
-        if ! command -v curl >/dev/null 2>&1; then
-          echo "❌ 'curl' is not installed. Please install it using your package manager."
-          exit 1
-        else
-          echo "✅ 'curl' is installed."
-        fi
+        declare -A tools=(
+          ["golangci-lint"]="github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+          ["godoc"]="golang.org/x/tools/cmd/godoc@latest"
+          ["goreleaser"]="github.com/goreleaser/goreleaser@latest"
+        )
+        
+        for tool in "${!tools[@]}"; do
+          if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "🔧 Installing $tool..."
+            go install "${tools[$tool]}"
+          else
+            echo "✅ $tool already installed"
+          fi
+        done
+      - task: install-tools:system-deps
 
-  update-deps:
-    desc: Update project dependencies
-    prompt: This will update all dependencies. Continue?
-    deps: [update-deps:go-get, update-deps:mod-tidy]
-    cmds: []
-
-  update-deps:go-get:
-    desc: Update Go modules
+  install-tools:system-deps:
+    desc: Install system dependencies
     cmds:
-      - echo "🔄 Updating dependencies with go get..."
-      - go get -u ./...
-
-  update-deps:mod-tidy:
-    desc: Tidy Go modules
-    cmds:
-      - echo "🔄 Tidy up Go modules..."
-      - go mod tidy
-
-  docker:build:
-    desc: Build Docker image with versioning
-    deps: [docker:check, docker:build-image]
-    cmds: []
-
-  docker:check:
-    desc: Ensure Docker is installed
-    preconditions:
-      - sh: docker version
-        msg: "Docker must be installed"
-    cmds: []
-
-  docker:build-image:
-    desc: Execute Docker build
-    cmds:
-      - echo "🐳 Building Docker image..."
       - |
-        docker build \
-          --build-arg VERSION={{.VERSION}} \
-          --build-arg COMMIT={{.COMMIT}} \
-          --build-arg BUILDTIME={{.BUILDTIME}} \
-          -t {{.BINARY_NAME}}:{{.VERSION}} \
-          -t {{.BINARY_NAME}}:latest .
+        for tool in "pigz" "zip"; do
+          if ! command -v $tool >/dev/null 2>&1; then
+            echo "🔧 Installing $tool..."
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y $tool
+            elif command -v brew >/dev/null 2>&1; then
+              brew install $tool
+            elif command -v yum >/dev/null 2>&1; then
+              sudo yum install -y $tool
+            else
+              echo "❌ Could not install $tool automatically. Please install manually."
+              exit 1
+            fi
+          fi
+        done
 
+# =============================================================================
+# Release Tasks
+# =============================================================================
   release:
-    desc: Create and push a new release
-    deps: [release:precheck, release:create-tag, release:push-tag]
-    cmds: []
+    desc: Create a new release
+    deps: [goreleaser:check]
+    cmds:
+      - task: goreleaser:snapshot
 
-  release:precheck:
-    desc: Ensure working directory is clean
+  goreleaser:check:
+    desc: Check GoReleaser installation
     preconditions:
-      - sh: git diff-index --quiet HEAD
-        msg: "Working directory is not clean. Commit or stash changes first."
-    cmds: []
+      - sh: command -v goreleaser
+        msg: "GoReleaser is not installed. Run 'task install-tools' first."
 
-  release:create-tag:
-    desc: Create Git tag
+  goreleaser:snapshot:
+    desc: Run GoReleaser in snapshot mode
+    cmds:
+      - echo "🚀 Testing GoReleaser build..."
+      - goreleaser release --snapshot --clean --skip-publish
+
+# =============================================================================
+# Development Tasks
+# =============================================================================
+  run:
+    desc: Run the application
+    deps: [build]
+    interactive: true
+    cmds:
+      - echo "🏃 Running {{.BINARY_NAME}}..."
+      - ./{{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+
+
+# =============================================================================
+# Setup Tasks
+# =============================================================================
+  setup:
+    desc: Setup development environment
+    cmds:
+      - task: setup:golang
+      - task: setup:ensure-path
+      - task: deps
+
+  setup:golang:
+    desc: Install or update Go
     vars:
-      TAG:
-        sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
+      GO_VERSION:
+        sh: curl -sSL https://go.dev/VERSION?m=text | head -n1
     cmds:
-      - echo "🔖 Creating Git tag {{.TAG}}..."
-      - git tag {{.TAG}}
+      - |
+        install_go() {
+          OS="$(uname | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64|amd64) ARCH="amd64" ;;
+            arm64|aarch64) ARCH="arm64" ;;
+            *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+          esac
 
-  release:push-tag:
-    desc: Push Git tag to origin
-    vars:
-      TAG:
-        sh: git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1"
-    cmds:
-      - git push origin {{.TAG}}
+          TMP_DIR=$(mktemp -d)
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          cd "$TMP_DIR"
 
-  watch:
-    desc: Watch for changes and rebuild
-    watch: true
-    sources:
-      - "**/*.go"
-      - go.mod
-      - go.sum
+          curl -fsSL "https://go.dev/dl/{{.GO_VERSION}}.${OS}-${ARCH}.tar.gz" -o go.tar.gz
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf go.tar.gz
+        }
+
+        if ! command -v go &>/dev/null; then
+          echo "Installing Go {{.GO_VERSION}}..."
+          install_go
+        else
+          CURRENT_VERSION="$(go version | awk '{print $3}')"
+          if [ "$CURRENT_VERSION" != "{{.GO_VERSION}}" ]; then
+            echo "Updating Go from $CURRENT_VERSION to {{.GO_VERSION}}..."
+            install_go
+          fi
+        fi
+      - task: setup:go-verify
+
+  setup:go-verify:
+    desc: Verify Go installation
     cmds:
-      - task: build
+      - |
+        if ! command -v go &>/dev/null; then
+          echo "❌ Go installation failed"
+          exit 1
+        fi
+        echo "✅ Go $(go version) is installed"
+
+  setup:ensure-path:
+    desc: "🔧 Ensure $HOME/.local/bin exists and is included in PATH"
+    cmds:
+      - mkdir -p "$HOME/.local/bin"
+      - |
+        for rc in ~/.bashrc ~/.zshrc; do
+          if [ -f "$rc" ]; then
+            if ! grep -Fxq 'export PATH="$HOME/.local/bin:$PATH"' "$rc"; then
+              echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
+              echo "✅ Added $HOME/.local/bin to $rc"
+            else
+              echo "✅ $HOME/.local/bin is already in $rc"
+            fi
+          else
+            echo "⚠️ $rc does not exist. Skipping..."
+          fi
+        done

@@ -1,4 +1,4 @@
-// Package cmd provides the root command and subcommands for the AgentExec CLI tool.
+// File: cmd/version.go
 package cmd
 
 import (
