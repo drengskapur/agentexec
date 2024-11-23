@@ -1,10 +1,10 @@
-Here’s a comprehensive README that outlines the implementation plan for **Omnivex**. This README emphasizes simplicity, utilizes effective design patterns, and ensures a high-quality, user-friendly TUI experience.
+Here’s a comprehensive README that outlines the implementation plan for **agentexec**. This README emphasizes simplicity, utilizes effective design patterns, and ensures a high-quality, user-friendly TUI experience.
 
 ---
 
-# Omnivex
+# agentexec
 
-Omnivex is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
+agentexec is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
 
 ## Features
 
@@ -36,7 +36,7 @@ Omnivex is a versatile, TUI-based application designed to manage and orchestrate
 
 ## Architecture and Design Patterns
 
-Omnivex follows a **modular, client-based architecture**, with each key function (e.g., packaging, API integration, TUI) encapsulated in its own component. This approach ensures clean separation of concerns and maintainability. 
+agentexec follows a **modular, client-based architecture**, with each key function (e.g., packaging, API integration, TUI) encapsulated in its own component. This approach ensures clean separation of concerns and maintainability. 
 
 - **Factory Pattern**: Used to initialize client connections (e.g., `APIClient`, `PackagerClient`, `UnpackagerClient`) based on user configurations and dependencies.
 - **Command Pattern**: Commands for package management, deployment, and API requests are encapsulated in functions that execute specific commands (e.g., `ListGiteaRepos` in `api.go`).
@@ -47,12 +47,12 @@ Omnivex follows a **modular, client-based architecture**, with each key function
 
 ## Installation
 
-To get started with Omnivex, clone the repository and use the included `Makefile` to install dependencies, build, and run the application.
+To get started with agentexec, clone the repository and use the included `Makefile` to install dependencies, build, and run the application.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/omnivex.git
-cd omnivex
+git clone https://github.com/yourusername/agentexec.git
+cd agentexec
 
 # Install dependencies and build
 make install-deps
@@ -89,7 +89,7 @@ Once the application is running, the TUI will guide you through options to:
 
 ## Configuration
 
-Omnivex uses environment variables and a configuration file (optional) for specifying base URLs and tokens for API connections. This approach supports secure, environment-specific configurations without requiring hardcoded values.
+agentexec uses environment variables and a configuration file (optional) for specifying base URLs and tokens for API connections. This approach supports secure, environment-specific configurations without requiring hardcoded values.
 
 Example `.env` file:
 
@@ -153,15 +153,15 @@ The TUI leverages Bubble Tea’s model-update-view architecture for a responsive
 
 ### Error Handling and Logging
 
-Omnivex includes structured error handling at each critical stage:
+agentexec includes structured error handling at each critical stage:
 
 - **API Requests**: Returns clear error messages for connection issues or bad responses, including HTTP status and response body.
 - **Package Management**: Detects and logs issues during package creation, deployment, or decompression.
-- **Logging**: Omnivex provides essential log outputs directly in the terminal, which can be easily redirected or saved for deeper debugging if needed.
+- **Logging**: agentexec provides essential log outputs directly in the terminal, which can be easily redirected or saved for deeper debugging if needed.
 
 ### Dependency Management
 
-Dependencies are managed through the `Makefile`, ensuring that each required tool (e.g., Docker, Helm, Git, pigz) is available in the environment. By dynamically retrieving the latest versions of Zarf and other tools, Omnivex ensures compatibility with recent API updates and leverages improvements in performance and security.
+Dependencies are managed through the `Makefile`, ensuring that each required tool (e.g., Docker, Helm, Git, pigz) is available in the environment. By dynamically retrieving the latest versions of Zarf and other tools, agentexec ensures compatibility with recent API updates and leverages improvements in performance and security.
 
 ---
 
@@ -176,4 +176,4 @@ Dependencies are managed through the `Makefile`, ensuring that each required too
 
 ## Conclusion
 
-Omnivex is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, Omnivex empowers users to easily manage and deploy resources across multiple services.
+agentexec is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, agentexec empowers users to easily manage and deploy resources across multiple services.

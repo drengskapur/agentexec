@@ -1,5 +1,5 @@
 {
     "yaml.schemas": {
-        "https://taskfile.dev/schema.json": "file:///workspaces/omnivex/Taskfile.yml"
+        "https://taskfile.dev/schema.json": "file:///workspaces/agentexec/Taskfile.yml"
     }
 }

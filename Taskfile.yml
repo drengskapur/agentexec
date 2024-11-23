@@ -9,7 +9,7 @@ shopt: [globstar]
 
 # Global variables for reusability
 vars:
-  BINARY_NAME: omnivex
+  BINARY_NAME: agentexec
   BUILD_DIR: build
   MAIN_GO: main.go
   VERSION:
@@ -19,9 +19,9 @@ vars:
   BUILDTIME:
     sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
   LDFLAGS: >-
-    -X 'omnivex/pkg/version.Version={{.VERSION}}'
-    -X 'omnivex/pkg/version.Commit={{.COMMIT}}'
-    -X 'omnivex/pkg/version.BuildTime={{.BUILDTIME}}'
+    -X 'agentexec/pkg/version.Version={{.VERSION}}'
+    -X 'agentexec/pkg/version.Commit={{.COMMIT}}'
+    -X 'agentexec/pkg/version.BuildTime={{.BUILDTIME}}'
   exeExt:
     sh: |
       case "{{.OS}}" in

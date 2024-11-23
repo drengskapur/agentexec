@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"omnivex/cmd"
+	"agentexec/cmd"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -52,7 +52,7 @@ func createLogger(verbose bool) (*zap.Logger, error) {
 	)
 
 	// Log startup information once
-	logger.Debug("Starting Omnivex",
+	logger.Debug("Starting agentexec",
 		zap.String("app_version", "1.0.0"),
 		zap.String("go_version", buildInfo.GoVersion),
 		zap.Int("pid", os.Getpid()),

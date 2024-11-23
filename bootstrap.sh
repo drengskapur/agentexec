@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Bootstrap Script for Omnivex Project
+# Bootstrap Script for agentexec Project
 #
 # This script ensures that the latest versions of Go and Task are installed.
 # It installs Go and Task if they are not present or updates them to the latest versions.

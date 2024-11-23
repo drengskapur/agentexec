@@ -55,17 +55,17 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">omnivex/cmd/combine.go (0.0%)</option>
+				<option value="file0">agentexec/cmd/combine.go (0.0%)</option>
 				
-				<option value="file1">omnivex/cmd/root.go (0.0%)</option>
+				<option value="file1">agentexec/cmd/root.go (0.0%)</option>
 				
-				<option value="file2">omnivex/cmd/version.go (0.0%)</option>
+				<option value="file2">agentexec/cmd/version.go (0.0%)</option>
 				
-				<option value="file3">omnivex/main.go (0.0%)</option>
+				<option value="file3">agentexec/main.go (0.0%)</option>
 				
-				<option value="file4">omnivex/pkg/combine/combine.go (0.0%)</option>
+				<option value="file4">agentexec/pkg/combine/combine.go (0.0%)</option>
 				
-				<option value="file5">omnivex/pkg/version/version.go (0.0%)</option>
+				<option value="file5">agentexec/pkg/version/version.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -85,7 +85,7 @@ package cmd
 import (
         "os"
 
-        "omnivex/pkg/combine"
+        "agentexec/pkg/combine"
 
         "github.com/spf13/cobra"
         "go.uber.org/zap"
@@ -187,9 +187,9 @@ const loggerKey contextKey = "logger"
 
 // RootCmd is the base command when called without any subcommands
 var RootCmd = &amp;cobra.Command{
-        Use:   "omnivex",
-        Short: "Omnivex is a CLI tool for combining files",
-        Long:  `Omnivex combines multiple files into a single text file.`,
+        Use:   "agentexec",
+        Short: "agentexec is a CLI tool for combining files",
+        Long:  `agentexec combines multiple files into a single text file.`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -213,7 +213,7 @@ import (
         "fmt"
         "os"
 
-        "omnivex/pkg/version"
+        "agentexec/pkg/version"
 
         "github.com/spf13/cobra"
         "go.uber.org/zap"
@@ -222,8 +222,8 @@ import (
 // versionCmd represents the version command
 var versionCmd = &amp;cobra.Command{
         Use:   "version",
-        Short: "Display the version of Omnivex",
-        Long:  `All software has versions. This is Omnivex's.`,
+        Short: "Display the version of agentexec",
+        Long:  `All software has versions. This is agentexec's.`,
         Run: func(cmd *cobra.Command, args []string) <span class="cov0" title="0">{
                 // Retrieve the logger from the context
                 logger, ok := cmd.Context().Value(loggerKey).(*zap.Logger)
@@ -256,7 +256,7 @@ import (
         "os"
         "runtime/debug"
 
-        "omnivex/cmd"
+        "agentexec/cmd"
 
         "go.uber.org/zap"
         "go.uber.org/zap/zapcore"
@@ -303,7 +303,7 @@ func createLogger(verbose bool) (*zap.Logger, error) <span class="cov0" title="0
         )
 
         // Log startup information once
-        logger.Debug("Starting Omnivex",
+        logger.Debug("Starting agentexec",
                 zap.String("app_version", "1.0.0"),
                 zap.String("go_version", buildInfo.GoVersion),
                 zap.Int("pid", os.Getpid()),

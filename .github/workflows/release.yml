@@ -48,16 +48,16 @@ jobs:
             esac
             
             GOOS=$os GOARCH=amd64 go build -ldflags="-s -w \
-              -X 'omnivex/pkg/version.Version=${{ env.VERSION }}' \
-              -X 'omnivex/pkg/version.Commit=$(git rev-parse --short HEAD)' \
-              -X 'omnivex/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
-              -o "build/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-${os}-amd64${ext}" main.go
+              -X 'agentexec/pkg/version.Version=${{ env.VERSION }}' \
+              -X 'agentexec/pkg/version.Commit=$(git rev-parse --short HEAD)' \
+              -X 'agentexec/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+              -o "build/${{ env.VERSION }}/agentexec-${{ env.VERSION }}-${os}-amd64${ext}" main.go
 
             # Package binaries
             if [ "$os" = "windows" ]; then
-              (cd "build/${{ env.VERSION }}" && zip "omnivex-${{ env.VERSION }}-${os}-amd64.zip" "omnivex-${{ env.VERSION }}-${os}-amd64${ext}")
+              (cd "build/${{ env.VERSION }}" && zip "agentexec-${{ env.VERSION }}-${os}-amd64.zip" "agentexec-${{ env.VERSION }}-${os}-amd64${ext}")
             else
-              tar -czf "build/${{ env.VERSION }}/omnivex-${{ env.VERSION }}-${os}-amd64.tar.gz" -C "build/${{ env.VERSION }}" "omnivex-${{ env.VERSION }}-${os}-amd64"
+              tar -czf "build/${{ env.VERSION }}/agentexec-${{ env.VERSION }}-${os}-amd64.tar.gz" -C "build/${{ env.VERSION }}" "agentexec-${{ env.VERSION }}-${os}-amd64"
             fi
           done
 
@@ -66,7 +66,7 @@ jobs:
           sha256sum * > checksums.txt
           
           # Create final assets archive
-          zip -r "../omnivex-${{ env.VERSION }}-assets.zip" *
+          zip -r "../agentexec-${{ env.VERSION }}-assets.zip" *
 
       - name: Generate Release Notes
         id: release_notes
