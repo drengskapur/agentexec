@@ -172,4 +172,4 @@ Dependencies are managed through the `Makefile`, ensuring that each required too
 
 ## Conclusion
 
-Omnivex is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, Omnivex empowers users to easily manage and deploy resources across multiple services.
+AgentExec is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, AgentExec empowers users to easily manage and deploy resources across multiple services.

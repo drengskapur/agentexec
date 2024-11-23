@@ -1,12 +1,8 @@
 #!/bin/bash
 #
-# Bootstrap Script for agentexec Project
+# Bootstrap Script
 #
-# This script ensures that the latest versions of Go and Task are installed.
-# It installs Go and Task if they are not present or updates them to the latest versions.
-
-# shellcheck disable=SC2034  # Variables may appear unused but are used in trap
-# shellcheck disable=SC2086  # Word splitting is intentional for some commands
+# This script ensures that Go and Task are installed.
 
 set -euo pipefail
 
@@ -16,6 +12,7 @@ set -euo pipefail
 readonly ORIGINAL_DIR="${PWD}"
 readonly SHELL_RC_FILES=("${HOME}/.bashrc" "${HOME}/.zshrc")
 readonly DEFAULT_CURL_OPTS=(-fsSL --connect-timeout 10 --max-time 30)
+readonly GO_VERSION_URL="https://go.dev/VERSION?m=text"
 readonly GO_DOWNLOAD_URL="https://go.dev/dl"
 readonly TASK_REPO_URL="https://api.github.com/repos/go-task/task"
 
@@ -121,14 +118,13 @@ get_latest_task_version() {
 #######################################
 get_latest_go_version() {
   local version_output
-  version_output="$(curl -s https://go.dev/VERSION?m=text | head -n1)"
-  
+  version_output="$(curl -s "${GO_VERSION_URL}" | head -n1)"
+
   # Validate the version format
   if [[ "${version_output}" =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "$version_output"
   else
     log_error "Invalid Go version format retrieved: ${version_output}"
-    exit 1
   fi
 }
 
@@ -206,7 +202,7 @@ install_go() {
   local -a tar_cmd
 
   log_info "Installing Go ${go_version}..."
-  
+
   temp_dir="$(mktemp -d)"
   TEMP_DIRS+=("${temp_dir}")
 
@@ -215,8 +211,8 @@ install_go() {
       log_error "Failed to enter temporary directory: ${temp_dir}"
     fi
 
-    curl_cmd=("${DEFAULT_CURL_OPTS[@]}" 
-              "${GO_DOWNLOAD_URL}/${go_version}.${PLATFORM}-${ARCH}.tar.gz" 
+    curl_cmd=("${DEFAULT_CURL_OPTS[@]}"
+              "${GO_DOWNLOAD_URL}/${go_version}.${PLATFORM}-${ARCH}.tar.gz"
               -o "go.tar.gz")
     if ! curl "${curl_cmd[@]}"; then
       log_error "Failed to download Go"
@@ -285,7 +281,7 @@ install_task() {
 
     package_name="$(basename "${download_url}")"
     curl_cmd=("${DEFAULT_CURL_OPTS[@]}" "${download_url}" -o "${package_name}")
-    
+
     if ! curl "${curl_cmd[@]}"; then
       log_error "Failed to download Task"
     fi

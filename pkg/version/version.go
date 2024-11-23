@@ -1,3 +1,4 @@
+// Package version provides version information for the AgentExec CLI tool.
 package version
 
 import (
@@ -5,23 +6,25 @@ import (
 	"runtime"
 )
 
+// These variables are populated at build time using -ldflags.
+// Example:
+// go build -ldflags "-X 'agentexec/pkg/version.Version=1.2.3' -X 'agentexec/pkg/version.Commit=abcdefg' -X 'agentexec/pkg/version.BuildTime=2024-04-27T15:04:05Z'"
 var (
-	// These will be populated by the compiler using -ldflags
-	Version   = "dev"
-	Commit    = "none"
-	BuildTime = "unknown"
+	Version   = "dev"     // Semantic version of the application
+	Commit    = "none"    // Git commit hash
+	BuildTime = "unknown" // Build timestamp
 )
 
-// Info contains version information
+// Info contains comprehensive version information.
 type Info struct {
-	Version   string
-	GitCommit string
-	BuildTime string
-	GoVersion string
-	Platform  string
+	Version   string // Semantic version
+	GitCommit string // Git commit hash
+	BuildTime string // Build timestamp
+	GoVersion string // Go runtime version
+	Platform  string // OS and architecture
 }
 
-// Get returns the version info
+// Get returns the current version information.
 func Get() Info {
 	return Info{
 		Version:   Version,
@@ -32,9 +35,12 @@ func Get() Info {
 	}
 }
 
-// String returns version information as a string
+// String returns the version information in a standard, single-line format.
+// Example Output:
+// agentexec version 1.2.3 (commit: abcdefg) built at 2024-04-27T15:04:05Z with go1.20.4 on linux/amd64
 func (i Info) String() string {
-	return fmt.Sprintf("Version: %s\nGit Commit: %s\nBuild Time: %s\nGo Version: %s\nPlatform: %s",
+	return fmt.Sprintf(
+		"agentexec version %s (commit: %s) built at %s with %s on %s",
 		i.Version,
 		i.GitCommit,
 		i.BuildTime,

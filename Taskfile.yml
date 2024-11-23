@@ -39,19 +39,19 @@ tasks:
 
   build:
     desc: Build the Go application with versioning
-    sources:
-      - "**/*.go"
-      - go.mod
-      - go.sum
-    generates:
-      - "{{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}}"
     preconditions:
       - sh: go version
         msg: "Go must be installed"
     cmds:
-      - echo "📦 Building {{.BINARY_NAME}}..."
+      - echo "📦 Cleaning previous build artifacts..."
+      - rm -rf {{.BUILD_DIR}}
       - mkdir -p {{.BUILD_DIR}}
+      - echo "📦 Building {{.BINARY_NAME}}..."
       - go build -ldflags="{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} {{.MAIN_GO}}
+      - echo "🔗 Adding {{.BINARY_NAME}} to PATH..."
+      - mkdir -p /home/codespace/.local/bin
+      - cp {{.BUILD_DIR}}/{{.BINARY_NAME}}{{.exeExt}} /home/codespace/.local/bin
+      - agentexec version
 
   run:
     desc: Run the Go application
