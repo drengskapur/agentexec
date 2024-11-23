@@ -1,10 +1,6 @@
-Here’s a comprehensive README that outlines the implementation plan for **agentexec**. This README emphasizes simplicity, utilizes effective design patterns, and ensures a high-quality, user-friendly TUI experience.
+# AgentExec
 
----
-
-# agentexec
-
-agentexec is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
+AgentExec is a versatile, TUI-based application designed to manage and orchestrate resources across multiple services, including **Rancher**, **Harvester**, **Artifactory**, **Gitea**, and **Zarf**. It provides a streamlined interface for package management and API-based infrastructure automation, making complex multi-cloud workflows simple and intuitive.
 
 ## Features
 
@@ -51,7 +47,7 @@ To get started with agentexec, clone the repository and use the included `Makefi
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/agentexec.git
+git clone https://github.com/drengskapur/agentexec.git
 cd agentexec
 
 # Install dependencies and build
@@ -176,4 +172,4 @@ Dependencies are managed through the `Makefile`, ensuring that each required too
 
 ## Conclusion
 
-agentexec is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, agentexec empowers users to easily manage and deploy resources across multiple services.
+Omnivex is designed to provide a seamless, user-friendly interface for managing complex, multi-cloud workflows. By using modern design patterns, providing flexible compression options, and focusing on simplicity and clarity in the TUI, Omnivex empowers users to easily manage and deploy resources across multiple services.
